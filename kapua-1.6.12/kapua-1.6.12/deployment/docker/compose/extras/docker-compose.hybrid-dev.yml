@@ -1,0 +1,9 @@
+services:
+  broker:
+    ports:
+      - "${KAPUA_BROKER_INTERNAL_PORT:-1893}:1893"
+  db:
+    ports:
+      - "${KAPUA_DB_WEB_PORT:-8181}:8181"
+    environment:
+      - H2_WEB_OPTS=-web -webAllowOthers -webPort ${KAPUA_DB_WEB_PORT:-8181}

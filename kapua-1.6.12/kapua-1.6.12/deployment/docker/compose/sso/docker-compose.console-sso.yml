@@ -1,0 +1,3 @@
+services:
+  kapua-console:
+    image: kapua/kapua-console:${IMAGE_VERSION}-sso

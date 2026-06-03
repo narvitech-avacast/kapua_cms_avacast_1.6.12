@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Explicit ORM mapping to ensure EclipseLink recognises KapuaEid as an
+    @Embeddable before processing DeviceImpl's embedded attributes.
+    This resolves a classloader-ordering issue in Jetty run mode where
+    EclipseLink validates embedded fields before processing all class metadata.
+-->
+<entity-mappings
+        xmlns="http://java.sun.com/xml/ns/persistence/orm"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://java.sun.com/xml/ns/persistence/orm
+                            http://java.sun.com/xml/ns/persistence/orm/orm_2_0.xsd"
+        version="2.0">
+
+    <embeddable class="org.eclipse.kapua.commons.model.id.KapuaEid" access="FIELD"/>
+
+</entity-mappings>

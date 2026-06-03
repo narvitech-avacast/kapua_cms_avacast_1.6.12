@@ -1,0 +1,245 @@
+/*******************************************************************************
+ * Copyright (c) 2017, 2022 Eurotech and/or its affiliates and others.
+ *
+ * This program and the accompanying materials are made
+ * available under the terms of the Eclipse Public License 2.0
+ * which is available at https://www.eclipse.org/legal/epl-2.0/
+ *
+ * SPDX-License-Identifier: EPL-2.0
+ *
+ * Contributors:
+ *     Eurotech - initial API and implementation
+ */
+package org.eclipse.kapua.app.api.resources.v1.resources;
+
+import org.eclipse.kapua.KapuaException;
+import org.eclipse.kapua.app.api.core.model.ScopeId;
+import org.eclipse.kapua.app.api.core.resources.AbstractKapuaResource;
+import org.eclipse.kapua.app.api.resources.v1.resources.model.DeviceRegistrationTokenStore;
+import org.eclipse.kapua.app.api.resources.v1.resources.model.GatewayConfigXmlGen;
+import org.eclipse.kapua.app.api.resources.v1.resources.model.Words;
+import org.eclipse.kapua.common.util.GatewayConfig.GatewayConfigModel;
+import org.eclipse.kapua.commons.responeCode.AccountResponseCode;
+import org.eclipse.kapua.commons.responeCode.DeviceResponseCode;
+import org.eclipse.kapua.commons.security.KapuaSecurityUtils;
+import org.eclipse.kapua.commons.setting.system.SystemSetting;
+import org.eclipse.kapua.commons.setting.system.SystemSettingKey;
+import org.eclipse.kapua.locator.KapuaLocator;
+import org.eclipse.kapua.service.account.Account;
+import org.eclipse.kapua.service.account.AccountService;
+import org.eclipse.kapua.service.device.management.gatewayconfig.DeviceTokenGenGatewayconfig;
+import org.eclipse.kapua.service.device.registry.Device;
+import org.eclipse.kapua.service.device.registry.DeviceCreator;
+import org.eclipse.kapua.service.device.registry.DeviceFactory;
+import org.eclipse.kapua.service.device.registry.DeviceRegistryService;
+import org.eclipse.kapua.service.user.User;
+import org.eclipse.kapua.service.user.UserFactory;
+import org.eclipse.kapua.service.user.UserListResult;
+import org.eclipse.kapua.service.user.UserQuery;
+import org.eclipse.kapua.service.user.UserService;
+
+import javax.ws.rs.Consumes;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
+
+@Path("devicesNoAuth")
+public class DeviceNoAuth extends AbstractKapuaResource {
+
+    private final KapuaLocator locator = KapuaLocator.getInstance();
+
+    private final DeviceRegistryService deviceService = locator.getService(DeviceRegistryService.class);
+    private final DeviceFactory deviceFactory = locator.getFactory(DeviceFactory.class);
+
+    private final UserService userService = locator.getService(UserService.class);
+    private final UserFactory userFactory = locator.getFactory(UserFactory.class);
+
+    private final AccountService accountService = locator.getService(AccountService.class);
+
+    @POST
+    @Path("getAndroidGatewayConfigByAccessToken")
+    @Consumes({MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML})
+    @Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML})
+    public Words getAndroidGatewayConfigByAccessToken(
+            DeviceTokenGenGatewayconfig tokenWithPlatform) {
+
+        SystemSetting systemSetting = SystemSetting.getInstance();
+
+        try {
+            if (tokenWithPlatform.getScopeId() == null || tokenWithPlatform.getScopeId().isEmpty()) {
+                Words err = new Words();
+                err.setValue("400:MISSING_SCOPE_ID");
+                return err;
+            }
+            final ScopeId scopeId = new ScopeId(tokenWithPlatform.getScopeId());
+
+            Device device;
+            if (!isBlank(tokenWithPlatform.getClientId())) {
+                boolean tokenValid = DeviceRegistrationTokenStore.getInstance().consume(
+                        scopeId.toCompactId(), tokenWithPlatform.getAccessToken());
+                if (!tokenValid) {
+                    Words err = new Words();
+                    err.setValue("401:INVALID_OR_EXPIRED_DEVICE_TOKEN");
+                    return err;
+                }
+                device = createOrFindDevice(scopeId, tokenWithPlatform);
+            } else {
+                device = KapuaSecurityUtils.doPrivileged(
+                        () -> deviceService.findByClientId(scopeId, tokenWithPlatform.getAccessToken()));
+            }
+
+            if (device == null) {
+                DeviceResponseCode code = DeviceResponseCode.NOT_FIND_DEVICE;
+                Words err = new Words();
+                err.setValue(code.fullDescription(code));
+                return err;
+            }
+
+            GatewayConfigModel gcm = buildGatewayConfigModel(device, systemSetting);
+            if (gcm == null) {
+                Words err = new Words();
+                err.setValue("5200:USER_NOT_FIND");
+                return err;
+            }
+
+            if ("Android".equals(tokenWithPlatform.getPlatform())) {
+                GatewayConfigXmlGen gcxg = new GatewayConfigXmlGen();
+                gcxg.setGatewayConfig(gcm);
+                return gcxg.build();
+            }
+
+            return new Words("");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            Words err = new Words();
+            err.setValue("500:" + e.getMessage());
+            return err;
+        }
+    }
+
+    private Device createOrFindDevice(
+            ScopeId scopeId,
+            DeviceTokenGenGatewayconfig tokenWithPlatform) throws KapuaException {
+
+        Device existing = KapuaSecurityUtils.doPrivileged(
+                () -> deviceService.findByClientId(scopeId, tokenWithPlatform.getClientId()));
+        if (existing != null) {
+            return existing;
+        }
+
+        DeviceCreator deviceCreator = KapuaSecurityUtils.doPrivileged(
+                () -> deviceFactory.newCreator(scopeId));
+        deviceCreator.setClientId(tokenWithPlatform.getClientId());
+        deviceCreator.setDisplayName(!isBlank(tokenWithPlatform.getDisplayName()) ?
+                tokenWithPlatform.getDisplayName() :
+                tokenWithPlatform.getClientId());
+
+        return KapuaSecurityUtils.doPrivileged(
+                () -> deviceService.create(deviceCreator));
+    }
+
+    @POST
+    @Path("{scopeId}/GatewayConfigByAccountID")
+    @Consumes({MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML})
+    @Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML})
+    public Words gatewayConfigByAccountID(
+            @PathParam("scopeId") ScopeId scopeId) {
+
+        SystemSetting systemSetting = SystemSetting.getInstance();
+
+        try {
+            Account account = KapuaSecurityUtils.doPrivileged(
+                    () -> accountService.find(scopeId));
+            if (account == null) {
+                AccountResponseCode code = AccountResponseCode.NOT_FIND_ACCOUNT;
+                Words err = new Words();
+                err.setValue(code.fullDescription(code));
+                return err;
+            }
+
+            DeviceCreator deviceCreator = KapuaSecurityUtils.doPrivileged(
+                    () -> deviceFactory.newCreator(account.getId()));
+            deviceCreator.setClientId("device-" + System.currentTimeMillis());
+            deviceCreator.setDisplayName("");
+
+            Device device = KapuaSecurityUtils.doPrivileged(
+                    () -> deviceService.create(deviceCreator));
+            if (device == null) {
+                DeviceResponseCode code = DeviceResponseCode.NOT_FIND_DEVICE;
+                Words err = new Words();
+                err.setValue(code.fullDescription(code));
+                return err;
+            }
+
+            GatewayConfigModel gcm = buildGatewayConfigModel(device, systemSetting);
+            if (gcm == null) {
+                Words err = new Words();
+                err.setValue("5200:USER_NOT_FIND");
+                return err;
+            }
+
+            GatewayConfigXmlGen gcxg = new GatewayConfigXmlGen();
+            gcxg.setGatewayConfig(gcm);
+            return gcxg.build();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            Words err = new Words();
+            err.setValue("500:" + e.getMessage());
+            return err;
+        }
+    }
+
+    private User findBrokerUser(org.eclipse.kapua.model.id.KapuaId scopeId) throws KapuaException {
+        UserQuery query = KapuaSecurityUtils.doPrivileged(
+                () -> userFactory.newQuery(scopeId));
+        UserListResult userList = KapuaSecurityUtils.doPrivileged(
+                () -> userService.query(query));
+
+        if (userList == null || userList.getSize() == 0) {
+            return null;
+        }
+        for (int i = 0; i < userList.getSize(); i++) {
+            User user = userList.getItem(i);
+            if (user.getName() != null && user.getName().endsWith("-broker")) {
+                return user;
+            }
+        }
+        return null;
+    }
+
+    private GatewayConfigModel buildGatewayConfigModel(Device device, SystemSetting systemSetting)
+            throws Exception {
+
+        GatewayConfigModel gcm = new GatewayConfigModel();
+        gcm.setDeviceName(device.getClientId());
+
+        User brokerUser = findBrokerUser(device.getScopeId());
+        if (brokerUser == null) {
+            return null;
+        }
+
+        gcm.setBrokerUser(brokerUser.getName());
+        gcm.setBrokerHost(systemSetting.getString(SystemSettingKey.BROKER_HOST));
+        gcm.setBrokerPort(systemSetting.getString(SystemSettingKey.BROKER_PORT, "1883"));
+        gcm.setBrokerProtocol(systemSetting.getString(SystemSettingKey.BROKER_SCHEME));
+
+        Account account = KapuaSecurityUtils.doPrivileged(
+                () -> accountService.find(brokerUser.getScopeId()));
+        if (account != null) {
+            gcm.setAccountName(account.getName());
+        }
+
+        String accountBaseName = brokerUser.getName().replace("-broker", "");
+        gcm.setBrokerPassword(accountBaseName + "-Password1!");
+
+        return gcm;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+}

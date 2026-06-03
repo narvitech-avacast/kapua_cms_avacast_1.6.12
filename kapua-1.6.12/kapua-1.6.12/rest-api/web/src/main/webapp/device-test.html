@@ -1,0 +1,702 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kapua Device Registration Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #222; }
+
+  /* ── Header ───────────────────────────────────────────── */
+  header { background: #1a73e8; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 1.2rem; font-weight: 600; }
+  header span { font-size: 0.85rem; opacity: .75; }
+
+  /* ── Layout ──────────────────────────────────────────── */
+  main { max-width: 900px; margin: 24px auto; padding: 0 16px; display: grid; gap: 20px; }
+
+  /* ── Cards ───────────────────────────────────────────── */
+  .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: hidden; }
+  .card-header { padding: 14px 20px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+  .card-header h2 { font-size: .95rem; font-weight: 600; color: #444; }
+  .card-body { padding: 20px; }
+
+  /* ── Form ────────────────────────────────────────────── */
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group.full { grid-column: 1 / -1; }
+  label { font-size: .82rem; font-weight: 500; color: #666; }
+  input, select { border: 1px solid #d0d5dd; border-radius: 6px; padding: 8px 11px; font-size: .9rem; outline: none; transition: border .15s; }
+  input:focus, select:focus { border-color: #1a73e8; }
+
+  /* ── Buttons ─────────────────────────────────────────── */
+  .btn { border: none; border-radius: 7px; padding: 9px 18px; font-size: .88rem; font-weight: 500; cursor: pointer; transition: opacity .15s, transform .1s; }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: #1a73e8; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #1557b0; }
+  .btn-success { background: #34a853; color: #fff; }
+  .btn-success:hover:not(:disabled) { background: #277a3e; }
+  .btn-outline { background: #fff; color: #1a73e8; border: 1px solid #1a73e8; }
+  .btn-outline:hover { background: #e8f0fe; }
+  .btn-sm { padding: 5px 12px; font-size: .8rem; }
+  .login-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  /* ── Status badge ────────────────────────────────────── */
+  .badge { display: inline-block; font-size: .75rem; font-weight: 600; padding: 2px 8px; border-radius: 12px; }
+  .badge-ok { background: #e6f4ea; color: #188038; }
+  .badge-err { background: #fce8e6; color: #c5221f; }
+  .badge-pending { background: #e8f0fe; color: #1a73e8; }
+
+  /* ── Token box ───────────────────────────────────────── */
+  .token-box { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px; position: relative; margin-top: 14px; }
+  .token-box label { font-size: .78rem; color: #888; display: block; margin-bottom: 4px; }
+  .token-value { font-family: 'Courier New', monospace; font-size: .88rem; word-break: break-all; color: #1a73e8; }
+  .copy-btn { position: absolute; top: 10px; right: 10px; }
+
+  /* ── Step flow ───────────────────────────────────────── */
+  .steps { display: flex; align-items: center; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+  .step { display: flex; align-items: center; gap: 6px; font-size: .82rem; color: #888; }
+  .step.active { color: #1a73e8; font-weight: 600; }
+  .step.done { color: #34a853; }
+  .step-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid currentColor; display: flex; align-items: center; justify-content: center; font-size: .7rem; font-weight: 700; flex-shrink: 0; }
+  .step-arrow { color: #ccc; }
+
+  /* ── Response viewer ─────────────────────────────────── */
+  .response-box { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 14px 16px; font-family: 'Courier New', monospace; font-size: .82rem; max-height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 14px; }
+
+  /* ── Modal overlay ───────────────────────────────────── */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .overlay.open { display: flex; }
+  .modal { background: #fff; border-radius: 12px; width: 480px; max-width: 94vw; box-shadow: 0 8px 32px rgba(0,0,0,.18); overflow: hidden; }
+  .modal-header { padding: 18px 20px 14px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+  .modal-header h3 { font-size: 1rem; font-weight: 600; }
+  .modal-close { background: none; border: none; font-size: 1.3rem; cursor: pointer; color: #888; line-height: 1; }
+  .modal-body { padding: 20px; }
+  .modal-footer { padding: 14px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* ── Success result ──────────────────────────────────── */
+  .result-success { background: #e6f4ea; border-radius: 8px; padding: 16px; text-align: center; }
+  .result-success .icon { font-size: 2rem; margin-bottom: 8px; }
+  .result-success h4 { font-size: .9rem; color: #188038; margin-bottom: 4px; }
+
+  /* ── Alert ───────────────────────────────────────────── */
+  .alert { border-radius: 7px; padding: 10px 14px; font-size: .85rem; margin-top: 12px; }
+  .alert-error { background: #fce8e6; color: #c5221f; border: 1px solid #f5c6c2; }
+  .alert-info  { background: #e8f0fe; color: #1a73e8; border: 1px solid #c5d9f8; }
+
+  /* ── Divider ─────────────────────────────────────────── */
+  hr { border: none; border-top: 1px solid #eee; margin: 16px 0; }
+
+  /* ── Spinner ─────────────────────────────────────────── */
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 5px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+    <rect width="26" height="26" rx="6" fill="rgba(255,255,255,.2)"/>
+    <path d="M13 5L5 9.5V16.5L13 21L21 16.5V9.5L13 5Z" stroke="white" stroke-width="1.8" fill="none"/>
+    <circle cx="13" cy="13" r="3" fill="white"/>
+  </svg>
+  <h1>Kapua Device Registration</h1>
+  <span id="loginStatus">未登入</span>
+</header>
+
+<main>
+
+  <!-- ① 登入卡片 -->
+  <div class="card" id="loginCard">
+    <div class="card-header">
+      <h2>① 登入 Kapua</h2>
+      <span id="loginBadge" class="badge badge-pending">待登入</span>
+    </div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label>帳號</label>
+          <input id="username" value="kapua-sys" placeholder="kapua-sys">
+        </div>
+        <div class="form-group">
+          <label>密碼</label>
+          <input id="password" type="password" value="kapua-password">
+        </div>
+      </div>
+      <div class="login-actions">
+        <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">登入</button>
+        <button class="btn btn-outline" id="ssoLoginBtn" onclick="doSsoLogin()">Google SSO 登入</button>
+      </div>
+      <div id="loginError"></div>
+      <div id="loginInfo" style="display:none">
+        <div class="token-box">
+          <label>Access Token (Kapua Session)</label>
+          <div class="token-value" id="sessionTokenDisplay"></div>
+          <button class="btn btn-outline btn-sm copy-btn" onclick="copyText('sessionTokenDisplay')">複製</button>
+        </div>
+        <div class="token-box" style="margin-top:8px">
+          <label>Scope ID（帳號 ID）</label>
+          <div class="token-value" id="scopeIdDisplay"></div>
+          <button class="btn btn-outline btn-sm copy-btn" onclick="copyText('scopeIdDisplay')">複製</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 產生裝置配對 Token -->
+  <div class="card" id="deviceCard">
+    <div class="card-header">
+      <h2>② 產生裝置配對 Token</h2>
+      <button class="btn btn-primary btn-sm" id="addDeviceBtn" onclick="openAddDialog()" disabled>產生 Token</button>
+    </div>
+    <div class="card-body">
+      <p style="font-size:.85rem; color:#888;">登入後產生一次性 Token，交給裝置輸入；裝置回傳 Token 和 Client ID 後，CMS 驗證通過才建立裝置。</p>
+      <div id="deviceResult" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- ③ 裝置端測試 -->
+  <div class="card">
+    <div class="card-header">
+      <h2>③ 裝置端：回傳 Token 取得 Gateway Config（不需登入）</h2>
+    </div>
+    <div class="card-body">
+      <p style="font-size:.83rem; color:#888; margin-bottom:14px;">
+        模擬裝置端行為：填入 CMS 產生的 Token 與裝置自己的 Client ID，呼叫無認證 API；CMS 驗證 Token 後建立裝置並回傳 MQTT 連線設定。
+      </p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Scope ID</label>
+          <input id="noAuthScopeId" placeholder="從上方複製">
+        </div>
+        <div class="form-group">
+          <label>配對 Token（CMS 產生）</label>
+          <input id="noAuthToken" placeholder="從上方複製">
+        </div>
+        <div class="form-group">
+          <label>裝置 Client ID（裝置回傳）</label>
+          <input id="noAuthClientId" placeholder="例如：device-001">
+        </div>
+        <div class="form-group">
+          <label>Platform</label>
+          <select id="noAuthPlatform">
+            <option value="Android">Android</option>
+            <option value="Windows">Windows</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-success" id="noAuthBtn" onclick="doNoAuthTest()">取得 Gateway Config</button>
+
+      <div id="noAuthResult" style="display:none">
+        <hr>
+        <div class="steps" id="flowSteps">
+          <div class="step done" id="s1"><div class="step-dot">✓</div> 裝置啟動</div>
+          <div class="step-arrow">→</div>
+          <div class="step active" id="s2"><div class="step-dot">2</div> 回傳 Token</div>
+          <div class="step-arrow">→</div>
+          <div class="step" id="s3"><div class="step-dot">3</div> 建立裝置</div>
+          <div class="step-arrow">→</div>
+          <div class="step" id="s4"><div class="step-dot">4</div> 連上 Broker</div>
+        </div>
+        <div class="response-box" id="gatewayConfigBox"></div>
+        <div id="mqttInfo" style="display:none; margin-top:14px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ 裝置統計 -->
+  <div class="card" id="statsCard">
+    <div class="card-header">
+      <h2>④ 裝置統計（需登入）</h2>
+      <button class="btn btn-outline btn-sm" id="statsBtn" onclick="loadStats()" disabled>重新整理</button>
+    </div>
+    <div class="card-body">
+      <div id="statsResult" style="color:#888; font-size:.85rem;">登入後點擊重新整理載入統計資料。</div>
+    </div>
+  </div>
+
+  <!-- ⑤ 最新事件 -->
+  <div class="card" id="eventsCard">
+    <div class="card-header">
+      <h2>⑤ 最新裝置事件（需登入）</h2>
+      <button class="btn btn-outline btn-sm" id="eventsBtn" onclick="loadEvents()" disabled>載入事件</button>
+    </div>
+    <div class="card-body">
+      <div id="eventsResult" style="color:#888; font-size:.85rem;">登入後點擊載入事件。</div>
+    </div>
+  </div>
+
+  <!-- 說明 -->
+  <div class="card">
+    <div class="card-header"><h2>完整流程說明</h2></div>
+    <div class="card-body" style="font-size:.85rem; color:#555; line-height:1.8;">
+      <strong>步驟 1</strong>：管理員登入 Kapua（使用 kapua-sys 或 Google SSO）<br>
+      <strong>步驟 2</strong>：CMS 產生一次性配對 Token<br>
+      <strong>步驟 3</strong>：將 Scope ID + Token 輸入裝置<br>
+      <strong>步驟 4</strong>：裝置上電後回傳 Token + Client ID 到 <code>POST /v1/devicesNoAuth/getAndroidGatewayConfigByAccessToken</code><br>
+      <strong>步驟 5</strong>：CMS 驗證 Token，對上後建立裝置並回傳原本的 Gateway Config XML
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Token 彈窗 ──────────────────────────────────────── -->
+<div class="overlay" id="addDialog">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>產生裝置配對 Token</h3>
+      <button class="modal-close" onclick="closeAddDialog()">✕</button>
+    </div>
+    <div class="modal-body" id="dialogBody">
+      <div class="alert alert-info" style="margin-top:0">
+        系統會產生一組短效一次性 Token。裝置輸入後，回傳 Token 與自己的 Client ID，CMS 驗證成功才建立裝置。
+      </div>
+      <div id="dialogError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeAddDialog()">取消</button>
+      <button class="btn btn-primary" id="createBtn" onclick="addDevice()">產生 Token</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── State ───────────────────────────────────────────────── */
+const APP_BASE = window.location.pathname.replace(/\/device-test\.html.*$/, '');
+const API = window.location.protocol === 'file:' ? 'http://localhost:8081/v1' : `${window.location.origin}${APP_BASE}/v1`;
+let sessionToken = '';
+let scopeId = '';
+
+/* ── Login ───────────────────────────────────────────────── */
+async function doLogin() {
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>登入中...';
+  setError('loginError', '');
+
+  try {
+    const res = await fetch(`${API}/authentication/user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+
+    applyKapuaSession(data, document.getElementById('username').value);
+
+  } catch(e) {
+    setError('loginError', '登入失敗：' + e.message);
+    document.getElementById('loginBadge').className = 'badge badge-err';
+    document.getElementById('loginBadge').textContent = '失敗';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登入';
+  }
+}
+
+function doSsoLogin() {
+  const btn = document.getElementById('ssoLoginBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>轉向 Google...';
+  setError('loginError', '');
+
+  const returnTo = window.location.pathname;
+  window.location.assign(`${APP_BASE}/sso/login?return_to=${encodeURIComponent(returnTo)}`);
+}
+
+async function doJwtLogin(accessToken, idToken) {
+  const ssoBtn = document.getElementById('ssoLoginBtn');
+  const loginBtn = document.getElementById('loginBtn');
+  ssoBtn.disabled = true;
+  loginBtn.disabled = true;
+  ssoBtn.innerHTML = '<span class="spinner"></span>SSO 登入中...';
+  setError('loginError', '');
+
+  try {
+    const res = await fetch(`${API}/authentication/jwt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ accessToken, idToken })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+
+    applyKapuaSession(data, 'Google SSO');
+  } catch(e) {
+    setError('loginError', 'SSO 登入失敗：' + e.message);
+    document.getElementById('loginBadge').className = 'badge badge-err';
+    document.getElementById('loginBadge').textContent = '失敗';
+  } finally {
+    ssoBtn.disabled = false;
+    loginBtn.disabled = false;
+    ssoBtn.textContent = 'Google SSO 登入';
+  }
+}
+
+function applyKapuaSession(data, label) {
+  sessionToken = data.tokenId;
+  scopeId = data.scopeId;
+
+  document.getElementById('sessionTokenDisplay').textContent = sessionToken;
+  document.getElementById('scopeIdDisplay').textContent = scopeId;
+  document.getElementById('loginInfo').style.display = 'block';
+  document.getElementById('loginBadge').className = 'badge badge-ok';
+  document.getElementById('loginBadge').textContent = '已登入';
+  document.getElementById('loginStatus').textContent = `已登入 (${label})`;
+  document.getElementById('addDeviceBtn').disabled = false;
+  document.getElementById('statsBtn').disabled = false;
+  document.getElementById('eventsBtn').disabled = false;
+  document.getElementById('noAuthScopeId').value = scopeId;
+  loadStats();
+}
+
+function handleSsoCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const accessToken = params.get('access_token');
+  const idToken = params.get('id_token');
+  const error = params.get('error');
+
+  if (accessToken && idToken) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+    doJwtLogin(accessToken, idToken);
+    return;
+  }
+
+  if (error) {
+    const desc = params.get('error_description') || error;
+    window.history.replaceState({}, document.title, window.location.pathname);
+    setError('loginError', 'SSO 登入失敗：' + desc);
+    document.getElementById('loginBadge').className = 'badge badge-err';
+    document.getElementById('loginBadge').textContent = '失敗';
+  }
+}
+
+/* ── Token Dialog ────────────────────────────────────────── */
+function openAddDialog() {
+  resetTokenDialog();
+  document.getElementById('addDialog').classList.add('open');
+}
+function closeAddDialog() {
+  document.getElementById('addDialog').classList.remove('open');
+  const dialogError = document.getElementById('dialogError');
+  if (dialogError) dialogError.innerHTML = '';
+}
+function genClientId() {
+  const uid = 'dev-' + crypto.randomUUID().replace(/-/g,'').slice(0,12);
+  document.getElementById('noAuthClientId').value = uid;
+}
+
+function resetTokenDialog() {
+  document.getElementById('dialogBody').innerHTML = `
+    <div class="alert alert-info" style="margin-top:0">
+      系統會產生一組短效一次性 Token。裝置輸入後，回傳 Token 與自己的 Client ID，CMS 驗證成功才建立裝置。
+    </div>
+    <div id="dialogError"></div>
+  `;
+  document.querySelector('.modal-footer').innerHTML = `
+    <button class="btn btn-outline" onclick="closeAddDialog()">取消</button>
+    <button class="btn btn-primary" id="createBtn" onclick="addDevice()">產生 Token</button>
+  `;
+}
+
+/* ── addDevice(): generate token only ────────────────────── */
+async function addDevice() {
+  const btn = document.getElementById('createBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>產生中...';
+  setError('dialogError', '');
+
+  try {
+    const res = await fetch(`${API}/${encodeURIComponent(scopeId)}/devices/registrationToken`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer ' + sessionToken
+      }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || JSON.stringify(data));
+
+    const token = data.value || '';
+    if (/^\d{3,4}:/.test(token)) throw new Error(token);
+
+    showDeviceCreated({ token, scopeId });
+    document.getElementById('noAuthScopeId').value = scopeId;
+    document.getElementById('noAuthToken').value = token;
+    if (!document.getElementById('noAuthClientId').value.trim()) {
+      genClientId();
+    }
+
+  } catch(e) {
+    setError('dialogError', '產生失敗：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '產生 Token';
+  }
+}
+
+function showDeviceCreated(registration) {
+  // Replace dialog body with success result
+  document.getElementById('dialogBody').innerHTML = `
+    <div class="result-success">
+      <div class="icon">✅</div>
+      <h4>配對 Token 已產生</h4>
+      <p style="font-size:.82rem; color:#555; margin-bottom:12px;">請將以下資訊輸入裝置</p>
+    </div>
+    <div class="token-box" style="margin-top:12px">
+      <label>配對 Token（一次性）</label>
+      <div class="token-value" id="createdToken">${registration.token}</div>
+      <button class="btn btn-outline btn-sm copy-btn" onclick="copyText('createdToken')">複製</button>
+    </div>
+    <div class="token-box" style="margin-top:8px">
+      <label>Scope ID（帳號 ID）</label>
+      <div class="token-value" id="createdScope">${registration.scopeId}</div>
+      <button class="btn btn-outline btn-sm copy-btn" onclick="copyText('createdScope')">複製</button>
+    </div>
+    <div class="alert alert-info" style="margin-top:12px; font-size:.82rem">
+      步驟三已自動填入 Token，請確認裝置 Client ID 後再取得 Gateway Config。
+    </div>
+  `;
+  document.querySelector('.modal-footer').innerHTML = `
+    <button class="btn btn-primary" onclick="closeAddDialog()">完成</button>
+  `;
+
+  // Also update card
+  const card = document.getElementById('deviceResult');
+  card.style.display = 'block';
+  card.innerHTML = `
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px">
+      <span class="badge badge-pending">待裝置回傳</span>
+      <strong style="font-size:.9rem">一次性配對 Token</strong>
+    </div>
+    <div class="token-box">
+      <label>配對 Token（供裝置端使用）</label>
+      <div class="token-value" id="cardToken">${registration.token}</div>
+      <button class="btn btn-outline btn-sm copy-btn" onclick="copyText('cardToken')">複製</button>
+    </div>
+  `;
+}
+
+/* ── No-Auth Test ────────────────────────────────────────── */
+async function doNoAuthTest() {
+  const scopeIdVal = document.getElementById('noAuthScopeId').value.trim();
+  const token = document.getElementById('noAuthToken').value.trim();
+  const clientId = document.getElementById('noAuthClientId').value.trim();
+  const platform = document.getElementById('noAuthPlatform').value;
+
+  if (!scopeIdVal || !token || !clientId) {
+    alert('請填入 Scope ID、配對 Token 和裝置 Client ID');
+    return;
+  }
+
+  const btn = document.getElementById('noAuthBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>呼叫中...';
+
+  document.getElementById('noAuthResult').style.display = 'block';
+  setStep(2);
+
+  try {
+    const res = await fetch(`${API}/devicesNoAuth/getAndroidGatewayConfigByAccessToken`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scopeId: scopeIdVal,
+        accessToken: token,
+        clientId: clientId,
+        displayName: clientId,
+        platform
+      })
+    });
+    const data = await res.json();
+
+    setStep(3);
+    const xmlStr = data.value || JSON.stringify(data, null, 2);
+    if (/^\d{3,4}:/.test(xmlStr)) throw new Error(xmlStr);
+    document.getElementById('gatewayConfigBox').textContent = xmlStr;
+
+    // Parse MQTT info from XML
+    const mqttInfo = parseMqttFromXml(xmlStr);
+    if (mqttInfo) {
+      setStep(4);
+      document.getElementById('mqttInfo').style.display = 'block';
+      document.getElementById('mqttInfo').innerHTML = `
+        <div style="background:#e6f4ea; border-radius:8px; padding:14px; font-size:.85rem">
+          <strong style="color:#188038">📡 MQTT 連線資訊解析成功</strong>
+          <table style="margin-top:8px; border-collapse:collapse; width:100%">
+            ${Object.entries(mqttInfo).map(([k,v]) => `
+              <tr>
+                <td style="padding:3px 10px 3px 0; color:#666; width:120px">${k}</td>
+                <td style="font-family:monospace; color:#222">${v}</td>
+              </tr>`).join('')}
+          </table>
+        </div>
+      `;
+    }
+
+  } catch(e) {
+    document.getElementById('gatewayConfigBox').textContent = '錯誤：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '取得 Gateway Config';
+  }
+}
+
+function parseMqttFromXml(xml) {
+  try {
+    const p = new DOMParser();
+    const doc = p.parseFromString(xml, 'text/xml');
+    const get = tag => doc.querySelector(tag)?.textContent || '';
+    const host = get('host'), port = get('port'), proto = get('protocol');
+    if (!host) return null;
+    return {
+      '協議 Protocol': proto,
+      '主機 Host': host,
+      '連接埠 Port': port,
+      '帳號 Username': get('username'),
+      '密碼 Password': get('password') ? '（已提供）' : '（未設定）',
+      '裝置名稱': get('deviceName'),
+      '帳號名稱': get('accountName'),
+      'MQTT URL': `${proto}://${host}:${port}`
+    };
+  } catch { return null; }
+}
+
+/* ── Helpers ─────────────────────────────────────────────── */
+function setStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById('s' + i);
+    if (!el) continue;
+    el.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
+    el.querySelector('.step-dot').textContent = i < n ? '✓' : i;
+  }
+}
+
+function setError(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = msg ? `<div class="alert alert-error" style="margin-top:10px">${msg}</div>` : '';
+}
+
+function copyText(id) {
+  const text = document.getElementById(id)?.textContent || '';
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✓ 已複製';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+handleSsoCallback();
+
+// Enter key on login
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !sessionToken) doLogin();
+});
+
+// Close dialog clicking overlay
+document.getElementById('addDialog').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeAddDialog();
+});
+
+/* ── Stats ───────────────────────────────────────────────── */
+async function loadStats() {
+  if (!sessionToken) return;
+  const el = document.getElementById('statsResult');
+  el.innerHTML = '<span class="spinner"></span> 載入中...';
+  try {
+    const [typeList, typeNum] = await Promise.all([
+      apiFetch(`/${encodeURIComponent(scopeId)}/devices/deviceTypeList`),
+      apiFetch(`/${encodeURIComponent(scopeId)}/devices/deviceTypeNumber`)
+    ]);
+
+    if (!typeList.ok || !typeNum.ok) throw new Error('API 錯誤');
+    const types = await typeList.json();
+    const count = await typeNum.json();
+
+    el.innerHTML = `
+      <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:14px;">
+        <div style="background:#e8f0fe; border-radius:8px; padding:12px 20px; text-align:center;">
+          <div style="font-size:1.6rem; font-weight:700; color:#1a73e8">${count.count}</div>
+          <div style="font-size:.78rem; color:#666">裝置類型數</div>
+        </div>
+        <div style="background:#e6f4ea; border-radius:8px; padding:12px 20px; text-align:center;">
+          <div style="font-size:1.6rem; font-weight:700; color:#188038">${types.reduce((s,t)=>s+t.count,0)}</div>
+          <div style="font-size:.78rem; color:#666">裝置總數</div>
+        </div>
+      </div>
+      ${types.length === 0
+        ? '<div style="color:#888; font-size:.85rem;">尚無裝置</div>'
+        : `<table style="width:100%; border-collapse:collapse; font-size:.85rem;">
+            <thead><tr style="background:#f8f9fa;">
+              <th style="padding:7px 12px; text-align:left; font-weight:600; color:#555;">Model ID</th>
+              <th style="padding:7px 12px; text-align:center; font-weight:600; color:#555;">數量</th>
+            </tr></thead>
+            <tbody>${types.map(t=>`
+              <tr style="border-top:1px solid #eee;">
+                <td style="padding:7px 12px; color:#333;">${t.modelId || '<i style="color:#aaa">（未設定）</i>'}</td>
+                <td style="padding:7px 12px; text-align:center;"><span class="badge badge-ok">${t.count}</span></td>
+              </tr>`).join('')}
+            </tbody></table>`
+      }
+    `;
+  } catch(e) {
+    el.innerHTML = `<div class="alert alert-error">載入失敗：${e.message}</div>`;
+  }
+}
+
+/* ── Events ──────────────────────────────────────────────── */
+async function loadEvents() {
+  if (!sessionToken) return;
+  const el = document.getElementById('eventsResult');
+  el.innerHTML = '<span class="spinner"></span> 載入中...';
+  try {
+    const res = await apiFetch(`/${encodeURIComponent(scopeId)}/devices/sortedEvents`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const items = data.items || [];
+
+    el.innerHTML = items.length === 0
+      ? '<div style="color:#888; font-size:.85rem;">尚無裝置事件</div>'
+      : `<table style="width:100%; border-collapse:collapse; font-size:.83rem;">
+          <thead><tr style="background:#f8f9fa;">
+            <th style="padding:7px 12px; text-align:left; color:#555;">時間</th>
+            <th style="padding:7px 12px; text-align:left; color:#555;">裝置</th>
+            <th style="padding:7px 12px; text-align:left; color:#555;">事件類型</th>
+          </tr></thead>
+          <tbody>${items.slice(0,10).map(e=>`
+            <tr style="border-top:1px solid #eee;">
+              <td style="padding:7px 12px; color:#666; white-space:nowrap">${new Date(e.receivedOn).toLocaleString('zh-TW')}</td>
+              <td style="padding:7px 12px; font-family:monospace; color:#1a73e8">${e.deviceId || '-'}</td>
+              <td style="padding:7px 12px; color:#333">${e.resource || '-'}</td>
+            </tr>`).join('')}
+          </tbody></table>
+          ${items.length > 10 ? `<div style="color:#888; font-size:.78rem; margin-top:8px;">顯示最新 10 筆，共 ${items.length} 筆</div>` : ''}
+        `;
+  } catch(e) {
+    el.innerHTML = `<div class="alert alert-error">載入失敗：${e.message}</div>`;
+  }
+}
+
+/* ── API helper ──────────────────────────────────────────── */
+function apiFetch(path, options = {}) {
+  return fetch(API + path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': 'Bearer ' + sessionToken,
+      ...(options.headers || {})
+    }
+  });
+}
+</script>
+</body>
+</html>

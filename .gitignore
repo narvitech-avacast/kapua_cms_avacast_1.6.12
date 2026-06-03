@@ -1,0 +1,10 @@
+# Logs
+nginx/logs/
+*.log
+
+# SSL certificates (locally generated)
+nginx/certs/
+
+# Environment secrets
+.env
+.env.local
