@@ -318,6 +318,7 @@ public class GwtDeviceServiceImpl extends KapuaRemoteServiceServlet implements G
             throws GwtKapuaException {
         KapuaLocator locator = KapuaLocator.getInstance();
         DeviceRegistryService deviceRegistryService = locator.getService(DeviceRegistryService.class);
+        final DeviceConnectionService deviceConnectionService = locator.getService(DeviceConnectionService.class);
 
         List<GwtDevice> gwtDevices = new ArrayList<GwtDevice>();
         BasePagingLoadResult<GwtDevice> gwtResults;
@@ -338,9 +339,22 @@ public class GwtDeviceServiceImpl extends KapuaRemoteServiceServlet implements G
                 gwtDevice.setConnectionInterface(d.getConnectionInterface());
 
                 DeviceConnection deviceConnection = d.getConnection();
+                if (deviceConnection == null && d.getClientId() != null) {
+                    final KapuaId scopeId = d.getScopeId();
+                    final String clientId = d.getClientId();
+                    deviceConnection = KapuaSecurityUtils.doPrivileged(new Callable<DeviceConnection>() {
+
+                        @Override
+                        public DeviceConnection call() throws Exception {
+                            return deviceConnectionService.findByClientId(scopeId, clientId);
+                        }
+                    });
+                }
                 if (deviceConnection != null) {
                     gwtDevice.setClientIp(deviceConnection.getClientIp());
+                    gwtDevice.setConnectionIp(deviceConnection.getClientIp());
                     gwtDevice.setGwtDeviceConnectionStatus(deviceConnection.getStatus().name());
+                    gwtDevice.setConnectionModifiedOn(deviceConnection.getModifiedOn());
                     gwtDevice.setLastEventOn(deviceConnection.getModifiedOn());
                     gwtDevice.setLastEventType(deviceConnection.getStatus().name());
                 } else {

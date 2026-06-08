@@ -34,14 +34,18 @@ import org.eclipse.kapua.app.console.module.api.client.ui.grid.EntityGrid;
 import org.eclipse.kapua.app.console.module.api.client.ui.view.AbstractEntityView;
 import org.eclipse.kapua.app.console.module.api.client.ui.widget.EntityCRUDToolbar;
 import org.eclipse.kapua.app.console.module.api.client.ui.widget.KapuaPagingToolbarMessages;
+import org.eclipse.kapua.app.console.module.api.shared.model.GwtConfigComponent;
+import org.eclipse.kapua.app.console.module.api.shared.model.GwtConfigParameter;
 import org.eclipse.kapua.app.console.module.api.shared.model.query.GwtQuery;
 import org.eclipse.kapua.app.console.module.api.shared.model.session.GwtSession;
-import org.eclipse.kapua.app.console.module.device.client.messages.ConsoleConnectionMessages;
 import org.eclipse.kapua.app.console.module.device.client.messages.ConsoleDeviceMessages;
 import org.eclipse.kapua.app.console.module.device.shared.model.GwtDevice;
 import org.eclipse.kapua.app.console.module.device.shared.model.GwtDeviceQuery;
 import org.eclipse.kapua.app.console.module.device.shared.model.GwtDeviceQueryPredicates;
+import org.eclipse.kapua.app.console.module.device.shared.model.GwtDeviceQueryPredicates.GwtDeviceStatus;
 import org.eclipse.kapua.app.console.module.device.shared.model.permission.DeviceSessionPermission;
+import org.eclipse.kapua.app.console.module.device.shared.service.GwtDeviceManagementService;
+import org.eclipse.kapua.app.console.module.device.shared.service.GwtDeviceManagementServiceAsync;
 import org.eclipse.kapua.app.console.module.device.shared.service.GwtDeviceService;
 import org.eclipse.kapua.app.console.module.device.shared.service.GwtDeviceServiceAsync;
 
@@ -54,17 +58,22 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
     private DeviceGridToolbar toolbar;
 
     private static final GwtDeviceServiceAsync GWT_DEVICE_SERVICE = GWT.create(GwtDeviceService.class);
+    private static final GwtDeviceManagementServiceAsync GWT_DEVICE_MANAGEMENT_SERVICE = GWT.create(GwtDeviceManagementService.class);
 
     private static final ConsoleDeviceMessages DEVICE_MSGS = GWT.create(ConsoleDeviceMessages.class);
-    private static final ConsoleConnectionMessages CONNECTION_MSGS = GWT.create(ConsoleConnectionMessages.class);
     private static final ConsoleMessages MSGS = GWT.create(ConsoleMessages.class);
     private static final String DEVICE = "device";
+    private static final String NETWORK_CONFIG_COMPONENT_ID = "com.PeerInternet.Network.Config";
+    private static final String WIFI_CONNECTED_SSID = "WiFiConnectedSSID";
+    private static final String WIFI_SIGNAL = "WiFiSignal";
+    private static final String HOT_SPOT_STATUS = "HotSpotStatus";
 
     public DeviceGrid(AbstractEntityView<GwtDevice> entityView, GwtSession currentSession) {
         super(entityView, currentSession);
         query = new GwtDeviceQuery();
         query.setScopeId(currentSession.getSelectedAccountId());
         query.setPredicates(new GwtDeviceQueryPredicates());
+        enforceEnabledDevices(query);
     }
 
     @Override
@@ -107,148 +116,81 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
         // Column Configuration
         List<ColumnConfig> columnConfigs = new ArrayList<ColumnConfig>();
 
-        ColumnConfig column = new ColumnConfig("status", DEVICE_MSGS.deviceTableStatus(), 50);
-        column.setAlignment(HorizontalAlignment.CENTER);
-        GridCellRenderer<GwtDevice> setStatusIcon = new GridCellRenderer<GwtDevice>() {
+        ColumnConfig column = new ColumnConfig("displayName", DEVICE_MSGS.peerDeviceTableName(), 150);
+        column.setSortable(true);
+        columnConfigs.add(column);
+
+        column = new ColumnConfig("peerStatus", DEVICE_MSGS.peerDeviceTableStatus(), 120);
+        GridCellRenderer<GwtDevice> statusRenderer = new GridCellRenderer<GwtDevice>() {
 
             @Override
             public String render(GwtDevice gwtDevice, String property, ColumnData config, int rowIndex, int colIndex, ListStore<GwtDevice> deviceList, Grid<GwtDevice> grid) {
-
                 KapuaIcon icon;
-                if (gwtDevice.getGwtDeviceConnectionStatusEnum() != null) {
-                    switch (gwtDevice.getGwtDeviceConnectionStatusEnum()) {
-                        case CONNECTED:
-                            icon = new KapuaIcon(IconSet.PLUG);
-                            icon.setColor(Color.GREEN);
-                            icon.setTitle(CONNECTION_MSGS.connected());
-                            break;
-                        case DISCONNECTED:
-                            icon = new KapuaIcon(IconSet.PLUG);
-                            icon.setColor(Color.YELLOW);
-                            icon.setTitle(CONNECTION_MSGS.disconnected());
-                            break;
-                        case MISSING:
-                            icon = new KapuaIcon(IconSet.PLUG);
-                            icon.setColor(Color.RED);
-                            icon.setTitle(CONNECTION_MSGS.missing());
-                            break;
-                        case UNKNOWN:
-                        case ANY:
-                        default:
-                            icon = new KapuaIcon(IconSet.PLUG);
-                            icon.setColor(Color.GREY);
-                            icon.setTitle(CONNECTION_MSGS.unknown());
-                            break;
-                    }
+                if (gwtDevice.isOnline()) {
+                    icon = new KapuaIcon(IconSet.CIRCLE);
+                    icon.setColor(Color.GREEN);
                 } else {
-                    icon = new KapuaIcon(IconSet.PLUG);
+                    icon = new KapuaIcon(IconSet.CIRCLE);
                     icon.setColor(Color.GREY);
-                    icon.setTitle(CONNECTION_MSGS.unknown());
                 }
+                icon.setTitle(gwtDevice.getPeerStatus());
+                return icon.getInlineHTML() + "&nbsp;" + gwtDevice.getPeerStatus();
+            }
+        };
+        column.setRenderer(statusRenderer);
+        column.setSortable(false);
+        columnConfigs.add(column);
 
+        column = new ColumnConfig("modelName", DEVICE_MSGS.peerDeviceTableDevice(), 120);
+        columnConfigs.add(column);
+
+        column = new ColumnConfig("version", DEVICE_MSGS.peerDeviceTableVersion(), 100);
+        columnConfigs.add(column);
+
+        column = new ColumnConfig("network", DEVICE_MSGS.peerDeviceTableNetwork(), 140);
+        column.setSortable(false);
+        columnConfigs.add(column);
+
+        column = new ColumnConfig("signal", DEVICE_MSGS.peerDeviceTableSignal(), 80);
+        column.setSortable(false);
+        columnConfigs.add(column);
+
+        column = new ColumnConfig("clientIp", DEVICE_MSGS.peerDeviceTableIp(), 110);
+        column.setSortable(false);
+        columnConfigs.add(column);
+
+        column = new ColumnConfig("hotSpotStatus", DEVICE_MSGS.peerDeviceTableAp(), 50);
+        GridCellRenderer<GwtDevice> apRenderer = new GridCellRenderer<GwtDevice>() {
+
+            @Override
+            public String render(GwtDevice gwtDevice, String property, ColumnData columnData, int row, int colum, ListStore<GwtDevice> listStore, Grid<GwtDevice> grid) {
+                KapuaIcon icon = new KapuaIcon(IconSet.CIRCLE);
+                if ("on".equalsIgnoreCase(gwtDevice.getHotSpotStatus())) {
+                    icon.setColor(Color.GREEN);
+                    icon.setTitle("Online");
+                } else {
+                    icon.setColor(Color.GREY);
+                    icon.setTitle("Offline");
+                }
                 return icon.getInlineHTML();
             }
         };
-        column.setRenderer(setStatusIcon);
+        column.setRenderer(apRenderer);
         column.setAlignment(HorizontalAlignment.CENTER);
         column.setSortable(false);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("clientId", DEVICE_MSGS.deviceTableClientID(), 175);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("displayName", DEVICE_MSGS.deviceTableDisplayName(), 150);
-        column.setSortable(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("lastEventOnFormatted", DEVICE_MSGS.deviceTableLastReportedDate(), 130);
-        column.setSortable(true);
-        column.setAlignment(HorizontalAlignment.CENTER);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("lastEventType", DEVICE_MSGS.deviceTableLastEventType(), 130);
+        column = new ColumnConfig("standbyApp", DEVICE_MSGS.peerDeviceTableShowing(), 120);
         column.setSortable(false);
-        column.setAlignment(HorizontalAlignment.CENTER);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("serialNumber", DEVICE_MSGS.deviceTableSerialNumber(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("applicationIdentifiers", DEVICE_MSGS.deviceTableApplications(), 100);
-        column.setSortable(false);
-        column.setHidden(false);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("iotFrameworkVersion", DEVICE_MSGS.deviceTableEsfKuraVersion(), 80);
-        column.setSortable(false);
-        column.setAlignment(HorizontalAlignment.CENTER);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("customAttribute1", DEVICE_MSGS.deviceTableCustomAttribute1(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("customAttribute2", DEVICE_MSGS.deviceTableCustomAttribute2(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("clientIp", DEVICE_MSGS.deviceTableRemoteIpAddress(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("modelId", DEVICE_MSGS.deviceTableModelId(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("firmwareVersion", DEVICE_MSGS.deviceTableFirmwareVersion(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("biosVersion", DEVICE_MSGS.deviceTableBiosVersion(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("osVersion", DEVICE_MSGS.deviceTableOsVersion(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("jvmVersion", DEVICE_MSGS.deviceTableJvmVersion(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("osgiFrameworkVersion", DEVICE_MSGS.deviceTableOsgiVersion(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("imei", DEVICE_MSGS.deviceTableImei(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("imsi", DEVICE_MSGS.deviceTableImsi(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("iccid", DEVICE_MSGS.deviceTableIccid(), 100);
-        column.setSortable(false);
-        column.setHidden(true);
-        columnConfigs.add(column);
-
         columnConfigs.add(column);
 
         return columnConfigs;
+    }
+
+    @Override
+    protected void configureEntityGrid() {
+        super.configureEntityGrid();
+        entityLoader.addLoadListener(new DeviceLoadListener());
     }
 
     @Override
@@ -272,6 +214,7 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
     @Override
     public void setFilterQuery(GwtQuery filterQuery) {
         query = (GwtDeviceQuery) filterQuery;
+        enforceEnabledDevices(query);
     }
 
     @Override
@@ -282,11 +225,87 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
         return toolbar;
     }
 
+    private void enforceEnabledDevices(GwtDeviceQuery deviceQuery) {
+        if (deviceQuery.getPredicates() == null) {
+            deviceQuery.setPredicates(new GwtDeviceQueryPredicates());
+        }
+        deviceQuery.getPredicates().setDeviceStatus(GwtDeviceStatus.ENABLED.name());
+    }
+
     private class DeviceLoadListener extends LoadListener {
         @Override
         public void loaderLoad(LoadEvent le) {
             super.loaderLoad(le);
             toolbar.setExportEnabled(((BasePagingLoadResult) le.getData()).getTotalLength() != 0);
+            loadOnlineDeviceNetworkConfigurations((BasePagingLoadResult<GwtDevice>) le.getData());
         }
+    }
+
+    private void loadOnlineDeviceNetworkConfigurations(BasePagingLoadResult<GwtDevice> devices) {
+        for (final GwtDevice device : devices.getData()) {
+            if (device.isOnline()) {
+                GWT_DEVICE_MANAGEMENT_SERVICE.findDeviceConfigurations(device, new AsyncCallback<List<GwtConfigComponent>>() {
+
+                    @Override
+                    public void onFailure(Throwable caught) {
+                        device.setWifiSSID("");
+                        device.setWifiSignal("");
+                        device.setHotSpotStatus("");
+                        entityStore.update(device);
+                    }
+
+                    @Override
+                    public void onSuccess(List<GwtConfigComponent> components) {
+                        applyNetworkConfiguration(device, components);
+                        entityStore.update(device);
+                    }
+                });
+            } else {
+                device.setWifiSSID("");
+                device.setWifiSignal("");
+                device.setHotSpotStatus("");
+                entityStore.update(device);
+            }
+        }
+    }
+
+    private void applyNetworkConfiguration(GwtDevice device, List<GwtConfigComponent> components) {
+        GwtConfigComponent networkConfig = findNetworkConfiguration(components);
+        if (networkConfig == null) {
+            device.setWifiSSID("");
+            device.setWifiSignal("");
+            device.setHotSpotStatus("");
+            return;
+        }
+
+        device.setWifiSSID(getParameterValue(networkConfig, WIFI_CONNECTED_SSID));
+        device.setWifiSignal(getParameterValue(networkConfig, WIFI_SIGNAL));
+        device.setHotSpotStatus(getParameterValue(networkConfig, HOT_SPOT_STATUS));
+    }
+
+    private GwtConfigComponent findNetworkConfiguration(List<GwtConfigComponent> components) {
+        if (components == null) {
+            return null;
+        }
+        for (GwtConfigComponent component : components) {
+            if (NETWORK_CONFIG_COMPONENT_ID.equals(component.getComponentId())) {
+                return component;
+            }
+        }
+        return null;
+    }
+
+    private String getParameterValue(GwtConfigComponent component, String parameterName) {
+        GwtConfigParameter parameter = component.getParameter(parameterName);
+        if (parameter == null) {
+            return "";
+        }
+        if (parameter.getValue() != null && !parameter.getValue().isEmpty()) {
+            return parameter.getValue();
+        }
+        if (parameter.getValues() != null && parameter.getValues().length > 0 && parameter.getValues()[0] != null) {
+            return parameter.getValues()[0];
+        }
+        return "";
     }
 }

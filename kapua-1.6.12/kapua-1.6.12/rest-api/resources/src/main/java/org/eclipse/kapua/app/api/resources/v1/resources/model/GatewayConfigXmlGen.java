@@ -54,10 +54,13 @@ public class GatewayConfigXmlGen {
         String brokerUser = nullSafe(gatewayConfig.getBrokerUser());
         String brokerPass = nullSafe(gatewayConfig.getBrokerPassword());
 
+        String clientId = accountName.isEmpty() ? deviceName : accountName + ":" + deviceName;
+
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
                "<gatewayConfig>\n" +
                "  <deviceName>" + deviceName + "</deviceName>\n" +
                "  <accountName>" + accountName + "</accountName>\n" +
+               "  <clientId>" + clientId + "</clientId>\n" +
                "  <broker>\n" +
                "    <protocol>" + protocol + "</protocol>\n" +
                "    <host>" + host + "</host>\n" +

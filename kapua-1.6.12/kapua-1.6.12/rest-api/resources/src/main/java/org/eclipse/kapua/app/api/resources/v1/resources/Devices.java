@@ -67,6 +67,8 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.ArrayList;
@@ -90,6 +92,9 @@ public class Devices extends AbstractKapuaResource {
     private final AccountService accountService = locator.getService(AccountService.class);
 
     private final CredentialService credentialService = locator.getService(CredentialService.class);
+
+    @Context
+    private HttpHeaders headers;
 
     // ─── Standard CRUD ──────────────────────────────────────────────────────────
 
@@ -448,7 +453,7 @@ public class Devices extends AbstractKapuaResource {
             }
 
             gcm.setBrokerUser(brokerUser.getName());
-            gcm.setBrokerHost(systemSetting.getString(SystemSettingKey.BROKER_HOST));
+            gcm.setBrokerHost(resolveBrokerHost(systemSetting));
             gcm.setBrokerPort(systemSetting.getString(SystemSettingKey.BROKER_PORT, "1883"));
             gcm.setBrokerProtocol(systemSetting.getString(SystemSettingKey.BROKER_SCHEME));
 
@@ -470,7 +475,7 @@ public class Devices extends AbstractKapuaResource {
                 err.setValue("5104:NOT_FIND_CREDENTIAL");
                 return err;
             }
-            gcm.setBrokerPassword(systemSetting.getString(SystemSettingKey.BROKER_PASSWORD, ""));
+            gcm.setBrokerPassword(resolveBrokerPassword(systemSetting, brokerUser));
 
             GatewayConfigXmlGen gcxg = new GatewayConfigXmlGen();
             gcxg.setGatewayConfig(gcm);
@@ -574,7 +579,7 @@ public class Devices extends AbstractKapuaResource {
         }
 
         gcm.setBrokerUser(brokerUser.getName());
-        gcm.setBrokerHost(systemSetting.getString(SystemSettingKey.BROKER_HOST));
+        gcm.setBrokerHost(resolveBrokerHost(systemSetting));
         gcm.setBrokerPort(systemSetting.getString(SystemSettingKey.BROKER_PORT, "1883"));
         gcm.setBrokerProtocol(systemSetting.getString(SystemSettingKey.BROKER_SCHEME));
 
@@ -583,7 +588,67 @@ public class Devices extends AbstractKapuaResource {
             gcm.setAccountName(account.getName());
         }
 
-        gcm.setBrokerPassword(systemSetting.getString(SystemSettingKey.BROKER_PASSWORD, ""));
+        gcm.setBrokerPassword(resolveBrokerPassword(systemSetting, brokerUser));
         return gcm;
+    }
+
+    private String resolveBrokerHost(SystemSetting systemSetting) {
+        String configuredHost = systemSetting.getString(SystemSettingKey.BROKER_HOST);
+        String requestHost = firstForwardedValue(header("X-Forwarded-Host"));
+        if (Strings.isNullOrEmpty(requestHost)) {
+            requestHost = header("Host");
+        }
+
+        String host = stripPort(requestHost);
+        if (!Strings.isNullOrEmpty(host)) {
+            if (isLocalHost(host) && !Strings.isNullOrEmpty(configuredHost)) {
+                return configuredHost;
+            }
+            return host;
+        }
+
+        return configuredHost;
+    }
+
+    private String header(String name) {
+        return headers != null ? headers.getHeaderString(name) : null;
+    }
+
+    private String firstForwardedValue(String value) {
+        if (Strings.isNullOrEmpty(value)) {
+            return value;
+        }
+
+        int commaIndex = value.indexOf(',');
+        return commaIndex >= 0 ? value.substring(0, commaIndex).trim() : value.trim();
+    }
+
+    private String stripPort(String host) {
+        if (Strings.isNullOrEmpty(host)) {
+            return host;
+        }
+
+        String trimmedHost = host.trim();
+        if (trimmedHost.startsWith("[")) {
+            int endBracket = trimmedHost.indexOf(']');
+            return endBracket > 0 ? trimmedHost.substring(1, endBracket) : trimmedHost;
+        }
+
+        int colonIndex = trimmedHost.indexOf(':');
+        return colonIndex >= 0 ? trimmedHost.substring(0, colonIndex) : trimmedHost;
+    }
+
+    private boolean isLocalHost(String host) {
+        return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host);
+    }
+
+    private String resolveBrokerPassword(SystemSetting systemSetting, User brokerUser) {
+        String configuredPassword = systemSetting.getString(SystemSettingKey.BROKER_PASSWORD, "");
+        if (configuredPassword != null && !configuredPassword.trim().isEmpty()) {
+            return configuredPassword;
+        }
+
+        String accountBaseName = brokerUser.getName().replace("-broker", "");
+        return accountBaseName + "-Password1!";
     }
 }

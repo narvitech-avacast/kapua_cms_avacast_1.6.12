@@ -27,6 +27,12 @@ public class GwtDevice extends GwtUpdatableEntityModel implements Serializable {
     private static final String CLIENT_ID = "clientId";
     private static final String GROUP_ID = "groupId";
     private static final String DISPLAY_NAME = "displayName";
+    private static final String OTA_VERSION = "otaVersion";
+    private static final String STANDBY_APP = "standbyApp";
+    private static final String WIFI_SSID = "wifiSSID";
+    private static final String WIFI_SIGNAL = "wifiSignal";
+    private static final String HOT_SPOT_STATUS = "hotSpotStatus";
+    private static final String CONNECTION_MODIFIED_ON = "connectionModifiedOn";
     private static final String CUSTOM_ATTRIBUTE_1 = "customAttribute1";
     private static final String CUSTOM_ATTRIBUTE_2 = "customAttribute2";
     private static final String CUSTOM_ATTRIBUTE_3 = "customAttribute3";
@@ -77,6 +83,14 @@ public class GwtDevice extends GwtUpdatableEntityModel implements Serializable {
             }
         } else if ("deviceConnectionStatusEnum".equals(property)) {
             return (X) GwtDeviceConnectionStatus.valueOf(getGwtDeviceConnectionStatus());
+        } else if ("peerStatus".equals(property)) {
+            return (X) getPeerStatus();
+        } else if ("version".equals(property)) {
+            return (X) getVersion();
+        } else if ("network".equals(property)) {
+            return (X) getNetwork();
+        } else if ("signal".equals(property)) {
+            return (X) getSignal();
         } else {
             return super.get(property);
         }
@@ -514,8 +528,116 @@ public class GwtDevice extends GwtUpdatableEntityModel implements Serializable {
         set(CUSTOM_ATTRIBUTE_5, customAttribute5);
     }
 
+    public String getOtaVersion() {
+        return get(OTA_VERSION);
+    }
+
+    public void setOtaVersion(String otaVersion) {
+        set(OTA_VERSION, otaVersion);
+    }
+
+    public String getStandbyApp() {
+        return get(STANDBY_APP);
+    }
+
+    public void setStandbyApp(String standbyApp) {
+        set(STANDBY_APP, standbyApp);
+    }
+
+    public String getWifiSSID() {
+        return get(WIFI_SSID);
+    }
+
+    public void setWifiSSID(String wifiSSID) {
+        set(WIFI_SSID, wifiSSID);
+    }
+
+    public String getWifiSignal() {
+        return get(WIFI_SIGNAL);
+    }
+
+    public void setWifiSignal(String wifiSignal) {
+        set(WIFI_SIGNAL, wifiSignal);
+    }
+
+    public String getHotSpotStatus() {
+        return get(HOT_SPOT_STATUS);
+    }
+
+    public void setHotSpotStatus(String hotSpotStatus) {
+        set(HOT_SPOT_STATUS, hotSpotStatus);
+    }
+
+    public Date getConnectionModifiedOn() {
+        return get(CONNECTION_MODIFIED_ON);
+    }
+
+    public void setConnectionModifiedOn(Date connectionModifiedOn) {
+        set(CONNECTION_MODIFIED_ON, connectionModifiedOn);
+    }
+
+    public String getPeerStatus() {
+        if (isOnline()) {
+            return "Online";
+        }
+
+        String offlineTime = getOfflineTime();
+        return offlineTime == null || offlineTime.isEmpty() ? "Offline" : "Offline " + offlineTime;
+    }
+
+    public String getVersion() {
+        String otaVersion = getOtaVersion();
+        if (otaVersion != null && !otaVersion.isEmpty()) {
+            return otaVersion;
+        }
+        return getFirmwareVersion();
+    }
+
+    public String getNetwork() {
+        if (!isOnline()) {
+            return "";
+        }
+
+        String wifiSSID = getWifiSSID();
+        return wifiSSID != null && !wifiSSID.isEmpty() ? wifiSSID : "Ethernet";
+    }
+
+    public String getSignal() {
+        String wifiSignal = getWifiSignal();
+        return wifiSignal != null && !wifiSignal.isEmpty() ? wifiSignal + " dBm" : "";
+    }
+
+    private String getOfflineTime() {
+        Date modifiedOn = getConnectionModifiedOn();
+        if (modifiedOn == null) {
+            return "";
+        }
+
+        long diffMs = new Date().getTime() - modifiedOn.getTime();
+        if (diffMs < 0) {
+            diffMs = 0;
+        }
+
+        long minutes = diffMs / (1000 * 60);
+        long hours = minutes / 60;
+        long days = hours / 24;
+
+        if (days >= 1) {
+            return days + "d:" + (hours % 24) + "h:" + (minutes % 60) + "m";
+        }
+        if (hours >= 1) {
+            return hours + "h:" + (minutes % 60) + "m";
+        }
+        return minutes + "m";
+    }
+
     public boolean isOnline() {
-        return "CONNECTED".equals(getGwtDeviceConnectionStatus());
+        String status = getGwtDeviceConnectionStatus();
+        if (status == null) {
+            return false;
+        }
+        status = status.trim();
+        return "CONNECTED".equalsIgnoreCase(status) || "ONLINE".equalsIgnoreCase(status);
     }
 
     //

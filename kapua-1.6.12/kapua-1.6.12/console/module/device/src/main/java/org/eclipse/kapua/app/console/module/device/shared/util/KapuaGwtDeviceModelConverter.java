@@ -67,6 +67,7 @@ public class KapuaGwtDeviceModelConverter {
         }
         gwtDevice.setGroupId(KapuaGwtCommonsModelConverter.convertKapuaId(device.getGroupId()));
         gwtDevice.setFirmwareVersion(device.getFirmwareVersion());
+        gwtDevice.setOtaVersion(device.getFirmwareVersion());
         gwtDevice.setBiosVersion(device.getBiosVersion());
         gwtDevice.setOsVersion(device.getOsVersion());
         gwtDevice.setJvmVersion(device.getJvmVersion());
@@ -106,7 +107,9 @@ public class KapuaGwtDeviceModelConverter {
         if (device.getConnection() != null) {
             DeviceConnection connection = device.getConnection();
             gwtDevice.setClientIp(connection.getClientIp());
+            gwtDevice.setConnectionIp(connection.getClientIp());
             gwtDevice.setGwtDeviceConnectionStatus(connection.getStatus().toString());
+            gwtDevice.setConnectionModifiedOn(connection.getModifiedOn());
             gwtDevice.setDeviceUserId(connection.getUserId().toCompactId());
         } else {
             gwtDevice.setGwtDeviceConnectionStatus(GwtDeviceConnectionStatus.UNKNOWN.name());
