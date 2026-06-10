@@ -36,6 +36,7 @@ public class DeviceGridToolbar extends EntityCRUDToolbar<GwtDevice> {
     private static final ConsoleMessages MSGS = GWT.create(ConsoleMessages.class);
 
     private KapuaButton export;
+    private KapuaButton addDeviceBtn;
 
     public DeviceGridToolbar(GwtSession currentSession) {
         super(currentSession);
@@ -48,6 +49,17 @@ public class DeviceGridToolbar extends EntityCRUDToolbar<GwtDevice> {
 
     @Override
     protected void onRender(Element target, int index) {
+        addDeviceBtn = new KapuaButton("Add Device", new KapuaIcon(IconSet.PLUS),
+                new SelectionListener<ButtonEvent>() {
+
+                    @Override
+                    public void componentSelected(ButtonEvent be) {
+                        DeviceTokenDialog dialog = new DeviceTokenDialog(currentSession);
+                        dialog.show();
+                    }
+                });
+        addExtraButton(addDeviceBtn);
+
         export = new KapuaButton(MSGS.exportToCSV(), new KapuaIcon(IconSet.FILE_TEXT_O),
                 new SelectionListener<ButtonEvent>() {
 
@@ -60,6 +72,7 @@ public class DeviceGridToolbar extends EntityCRUDToolbar<GwtDevice> {
         super.onRender(target, index);
         getAddEntityButton().setEnabled(currentSession.hasPermission(DeviceSessionPermission.write()));
         getEditEntityButton().disable();
+        addDeviceBtn.setEnabled(currentSession.hasPermission(DeviceSessionPermission.write()));
     }
 
     @Override
