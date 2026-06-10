@@ -2,6 +2,10 @@
 nginx/logs/
 *.log
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # SSL certificates (locally generated)
 nginx/certs/
 

@@ -76,7 +76,7 @@ services:
       - KAPUA_OPENID_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token
       - KAPUA_OPENID_LOGOUT_ENDPOINT=https://oauth2.googleapis.com/revoke
       - KAPUA_OPENID_USERINFO_ENDPOINT=https://www.googleapis.com/oauth2/v3/userinfo
-      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true
+      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dconsole.sso.openid.user.logout.enabled=false -Dsso.openid.claims.externalUsername.key=email -Dauto.registration.simple.accountExpirationDate.days=0 -Dauto.registration.simple.maximumNumberOfChildUsers=2
   kapua-api:
     container_name: kapua-api
     image: kapua/kapua-api:${IMAGE_VERSION}
@@ -102,7 +102,7 @@ services:
       - LOGBACK_LOG_LEVEL
       - SWAGGER=${KAPUA_SWAGGER_ENABLE:-true}
       - BROKER_ADDR=172.16.19.37
-      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dbroker.scheme=mqtt -Dbroker.mqtt.password=kapua-password -Dsso.openid.provider=generic -Dsso.openid.client.id=${KAPUA_OPENID_CLIENT_ID} -Dsso.openid.client.secret=${KAPUA_OPENID_CLIENT_SECRET} -Dsso.openid.generic.jwt.issuer.allowed=https://accounts.google.com -Dsso.openid.generic.jwt.audience.allowed=${KAPUA_OPENID_JWT_AUDIENCE} -Dsso.openid.generic.server.endpoint.auth=https://accounts.google.com/o/oauth2/v2/auth -Dsso.openid.generic.server.endpoint.token=https://oauth2.googleapis.com/token -Dsso.openid.generic.server.endpoint.userinfo=https://www.googleapis.com/oauth2/v3/userinfo
+      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dbroker.scheme=mqtt -Dbroker.mqtt.password=kapua-password -Dsso.openid.provider=generic -Dsso.openid.client.id=${KAPUA_OPENID_CLIENT_ID} -Dsso.openid.client.secret=${KAPUA_OPENID_CLIENT_SECRET} -Dsso.openid.generic.jwt.issuer.allowed=https://accounts.google.com -Dsso.openid.generic.jwt.audience.allowed=${KAPUA_OPENID_JWT_AUDIENCE} -Dsso.openid.generic.server.endpoint.auth=https://accounts.google.com/o/oauth2/v2/auth -Dsso.openid.generic.server.endpoint.token=https://oauth2.googleapis.com/token -Dsso.openid.generic.server.endpoint.userinfo=https://www.googleapis.com/oauth2/v3/userinfo -Dsso.openid.claims.externalUsername.key=email
   job-engine:
     container_name: job-engine
     image: kapua/kapua-job-engine:${IMAGE_VERSION}

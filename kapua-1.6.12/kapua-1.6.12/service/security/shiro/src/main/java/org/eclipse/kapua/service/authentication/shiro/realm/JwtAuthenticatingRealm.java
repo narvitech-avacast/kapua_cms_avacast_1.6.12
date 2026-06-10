@@ -262,14 +262,11 @@ public class JwtAuthenticatingRealm extends KapuaAuthenticatingRealm implements 
      * @since 2.0.0
      */
     private String extractExternalUsername(JsonObject userInfo) {
-        final String externalUsername;
-        try {
-            externalUsername = userInfo.getString(jwtProcessor.getExternalUsernameClaimName());
-        } catch (Exception e) {
-            throw new ShiroException("Failed to parse JWT", e);
+        if (userInfo == null) {
+            return null;
         }
 
-        return externalUsername;
+        return userInfo.getString(jwtProcessor.getExternalUsernameClaimName(), null);
     }
 
     /**

@@ -2,12 +2,11 @@
 param()
 $ErrorActionPreference = "Stop"
 
-$ROOT          = $PSScriptRoot
-$COMPOSE_DIR   = "$ROOT\kapua-1.6.12\kapua-1.6.12\deployment\docker\compose"
-$CUSTOM_JAR    = "$ROOT\kapua-api-resources-running.jar"
-$CONTAINER_JAR = "/var/opt/jetty/webapps/root/WEB-INF/lib/kapua-rest-api-resources-1.6.12.jar"
-$IMAGE_VER     = "1.6.12"
-$PROJECT       = "compose"
+$ROOT        = $PSScriptRoot
+$COMPOSE_DIR = "$ROOT\kapua-1.6.12\kapua-1.6.12\deployment\docker\compose"
+$PATCH_DIR   = "$ROOT\kapua-api-patch"
+$IMAGE_VER   = "1.6.12"
+$PROJECT     = "compose"
 
 function Write-Step { param($msg) Write-Host "`n>>> $msg" -ForegroundColor Cyan }
 function Write-OK   { param($msg) Write-Host "    [OK] $msg" -ForegroundColor Green }
@@ -24,11 +23,35 @@ try {
 if ($LASTEXITCODE -ne 0) { Write-Fail "Docker 未啟動，請先開啟 Docker Desktop 後再執行此腳本" }
 Write-OK "Docker 正常運作"
 
-# ---- 2. 偵測容器狀態 -------------------------------------------------------
+# ---- 2. 同步 patch image（若自訂 JAR 有更新才重建）------------------------
+Write-Step "檢查 kapua-api patch image..."
+$patchedImg = docker images "kapua/kapua-api:1.6.12-patched" --format "{{.ID}}" 2>$null
+
+# 比較 patch 目錄裡最新修改時間 vs image 建立時間
+$patchMtime = (Get-ChildItem $PATCH_DIR | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
+if ($patchedImg) {
+    $imgCreated = [datetime](docker inspect "kapua/kapua-api:1.6.12-patched" --format "{{.Created}}" 2>$null)
+    if ($patchMtime -gt $imgCreated) {
+        Write-Warn "patch 檔案有更新，重新建立 image..."
+        $patchedImg = $null
+    }
+}
+
+if (-not $patchedImg) {
+    Write-OK "建立 kapua/kapua-api:1.6.12-patched image..."
+    # 同步自訂 JAR 到 patch 目錄
+    Copy-Item "$ROOT\kapua-api-resources-running.jar" "$PATCH_DIR\kapua-api-resources-running.jar" -Force
+    docker build -t "kapua/kapua-api:1.6.12-patched" $PATCH_DIR
+    if ($LASTEXITCODE -ne 0) { Write-Fail "docker build 失敗" }
+    Write-OK "image 建立完成"
+} else {
+    Write-OK "patch image 已是最新版本"
+}
+
+# ---- 3. 偵測容器狀態 -------------------------------------------------------
 Write-Step "偵測容器狀態..."
 $existing = docker ps -a --filter "name=^kapua-api$" --format "{{.Names}}" 2>$null
 $running  = docker ps   --filter "name=^kapua-api$" --format "{{.Names}}" 2>$null
-$needDeploy = $false
 
 Set-Location $COMPOSE_DIR
 $env:IMAGE_VERSION = $IMAGE_VER
@@ -43,34 +66,6 @@ if ($running -eq "kapua-api") {
     Write-OK "容器不存在，執行 docker compose up -d（全新啟動）..."
     docker compose -p $PROJECT up -d
     if ($LASTEXITCODE -ne 0) { Write-Fail "docker compose up 失敗" }
-    $needDeploy = $true
-}
-
-# ---- 3. 部署自訂 JAR（全新啟動才需要）-------------------------------------
-if ($needDeploy) {
-    Write-Step "等待 kapua-api 容器就緒..."
-    $waited = 0
-    do {
-        Start-Sleep -Seconds 5
-        $waited += 5
-        $state = docker inspect kapua-api --format "{{.State.Running}}" 2>$null
-        Write-Host "    已等待 ${waited}s..." -ForegroundColor DarkGray
-    } while ($state -ne "true" -and $waited -lt 60)
-
-    if ($state -ne "true") { Write-Fail "kapua-api 啟動逾時，請用 docker logs kapua-api 查看問題" }
-
-    Write-Step "部署自訂 API JAR..."
-    if (-not (Test-Path $CUSTOM_JAR)) {
-        Write-Warn "找不到 $CUSTOM_JAR，跳過 JAR 部署（API 將使用原廠版本）"
-    } else {
-        docker cp "$CUSTOM_JAR" "kapua-api:$CONTAINER_JAR"
-        if ($LASTEXITCODE -ne 0) { Write-Fail "docker cp 失敗" }
-        Write-OK "JAR 已複製，重啟 kapua-api..."
-        docker restart kapua-api
-        if ($LASTEXITCODE -ne 0) { Write-Fail "docker restart 失敗" }
-        Start-Sleep -Seconds 5
-        Write-OK "kapua-api 重啟完成"
-    }
 }
 
 # ---- 4. 最終狀態 -----------------------------------------------------------

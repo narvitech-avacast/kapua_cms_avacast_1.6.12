@@ -317,6 +317,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .mGET{background:#1f3a5f;color:var(--blue)} .mPOST{background:#1a3a28;color:var(--green)}
 .mPUT{background:#3a2b10;color:var(--yellow)} .mDELETE{background:#3a1515;color:var(--red)}
 .mPATCH{background:#2d1f4a;color:var(--purple)} .mX{background:var(--bg3);color:var(--tx2)}
+.mMQTT{background:#0d2e35;color:#56d4e8} .smqtt{background:#0d2e35;color:#56d4e8}
 .s2{background:#1a3a28;color:var(--green)} .s3{background:#2e2c16;color:var(--yellow)}
 .s4{background:#3a2010;color:var(--orange)} .s5{background:#3a1515;color:var(--red)}
 
@@ -371,6 +372,7 @@ table.hdrs tr:nth-child(even) td{background:#0f131a}
   <button class="mbtn" data-m="POST">POST</button>
   <button class="mbtn" data-m="PUT">PUT</button>
   <button class="mbtn" data-m="DELETE">DEL</button>
+  <button class="mbtn" data-m="MQTT">MQTT</button>
   <span id="cnt">0</span>
   <button id="clr">Clear</button>
 </div>
@@ -415,8 +417,10 @@ connect();
 function addEntry(d) {
   data[d.id] = d;
   const m = d.method || '?';
-  const mc = ['GET','POST','PUT','DELETE','PATCH'].includes(m) ? m : 'X';
+  const mc = ['GET','POST','PUT','DELETE','PATCH','MQTT'].includes(m) ? m : 'X';
   const sc = d.res_status ? Math.floor(d.res_status / 100) : 0;
+  const statusText = m === 'MQTT' ? 'MSG' : (d.res_status || '…');
+  const statusCls  = m === 'MQTT' ? 'mqtt' : (sc || 'X');
 
   const row = document.createElement('div');
   row.className = 'row';
@@ -428,7 +432,7 @@ function addEntry(d) {
     <span class="rts">${d.ts}</span>
     <span class="m m${mc}">${m}</span>
     <span class="rpath" title="${esc(d.path)}">${esc(d.path)}</span>
-    <span class="s s${sc || 'X'}">${d.res_status || '…'}</span>`;
+    <span class="s s${statusCls}">${statusText}</span>`;
   row.addEventListener('click', () => select(d.id));
 
   applyFilter(row);
@@ -457,13 +461,13 @@ function select(id) {
   pane.style.display = 'flex';
 
   const m = d.method;
-  const mc = ['GET','POST','PUT','DELETE','PATCH'].includes(m) ? m : 'X';
+  const mc = ['GET','POST','PUT','DELETE','PATCH','MQTT'].includes(m) ? m : 'X';
   const sc = d.res_status ? Math.floor(d.res_status/100) : 0;
 
   $('ov-line1').innerHTML =
     `<span class="m m${mc}">${m}</span> <span style="font-family:monospace">${esc(d.path)}</span>`;
   $('ov-line2').innerHTML = [
-    d.res_status ? `<b class="s s${sc}" style="font-size:.8rem">${d.res_status}</b>` : '',
+    m === 'MQTT' ? `<b class="s smqtt" style="font-size:.8rem">MQTT MSG</b>` : (d.res_status ? `<b class="s s${sc}" style="font-size:.8rem">${d.res_status}</b>` : ''),
     d.duration_ms ? `⏱ ${d.duration_ms} ms` : '',
     d.req_headers?.['x-real-ip'] || d.req_headers?.['X-Real-IP'] ? `IP: ${d.req_headers['x-real-ip']||d.req_headers['X-Real-IP']}` : '',
   ].filter(Boolean).join('&ensp;·&ensp;');
@@ -596,6 +600,9 @@ start(UIHandler,    UI_PORT,    "UI")
 
 import tcp_probe
 tcp_probe.start(record)
+
+import mqtt_subscriber
+mqtt_subscriber.start(record)
 
 print("Ready.", flush=True)
 threading.Event().wait()
