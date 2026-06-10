@@ -351,8 +351,9 @@ public class GwtDeviceServiceImpl extends KapuaRemoteServiceServlet implements G
                     });
                 }
                 if (deviceConnection != null) {
-                    gwtDevice.setClientIp(deviceConnection.getClientIp());
-                    gwtDevice.setConnectionIp(deviceConnection.getClientIp());
+                    String clientIp = hasText(d.getConnectionIp()) ? d.getConnectionIp() : deviceConnection.getClientIp();
+                    gwtDevice.setClientIp(clientIp);
+                    gwtDevice.setConnectionIp(clientIp);
                     gwtDevice.setGwtDeviceConnectionStatus(deviceConnection.getStatus().name());
                     gwtDevice.setConnectionModifiedOn(deviceConnection.getModifiedOn());
                     gwtDevice.setLastEventOn(deviceConnection.getModifiedOn());
@@ -380,6 +381,10 @@ public class GwtDeviceServiceImpl extends KapuaRemoteServiceServlet implements G
         gwtResults.setTotalLength(totalResult);
 
         return gwtResults;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     @Override

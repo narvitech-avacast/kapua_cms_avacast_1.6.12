@@ -38,7 +38,6 @@ import org.eclipse.kapua.app.console.module.api.shared.model.GwtConfigComponent;
 import org.eclipse.kapua.app.console.module.api.shared.model.GwtConfigParameter;
 import org.eclipse.kapua.app.console.module.api.shared.model.query.GwtQuery;
 import org.eclipse.kapua.app.console.module.api.shared.model.session.GwtSession;
-import org.eclipse.kapua.app.console.module.device.client.messages.ConsoleDeviceMessages;
 import org.eclipse.kapua.app.console.module.device.shared.model.GwtDevice;
 import org.eclipse.kapua.app.console.module.device.shared.model.GwtDeviceQuery;
 import org.eclipse.kapua.app.console.module.device.shared.model.GwtDeviceQueryPredicates;
@@ -60,7 +59,6 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
     private static final GwtDeviceServiceAsync GWT_DEVICE_SERVICE = GWT.create(GwtDeviceService.class);
     private static final GwtDeviceManagementServiceAsync GWT_DEVICE_MANAGEMENT_SERVICE = GWT.create(GwtDeviceManagementService.class);
 
-    private static final ConsoleDeviceMessages DEVICE_MSGS = GWT.create(ConsoleDeviceMessages.class);
     private static final ConsoleMessages MSGS = GWT.create(ConsoleMessages.class);
     private static final String DEVICE = "device";
     private static final String NETWORK_CONFIG_COMPONENT_ID = "com.PeerInternet.Network.Config";
@@ -116,11 +114,11 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
         // Column Configuration
         List<ColumnConfig> columnConfigs = new ArrayList<ColumnConfig>();
 
-        ColumnConfig column = new ColumnConfig("displayName", DEVICE_MSGS.peerDeviceTableName(), 150);
+        ColumnConfig column = new ColumnConfig("displayName", "Name", 150);
         column.setSortable(true);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("peerStatus", DEVICE_MSGS.peerDeviceTableStatus(), 120);
+        column = new ColumnConfig("peerStatus", "Status", 120);
         GridCellRenderer<GwtDevice> statusRenderer = new GridCellRenderer<GwtDevice>() {
 
             @Override
@@ -141,25 +139,21 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
         column.setSortable(false);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("modelName", DEVICE_MSGS.peerDeviceTableDevice(), 120);
+        column = new ColumnConfig("modelName", "Device", 120);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("version", DEVICE_MSGS.peerDeviceTableVersion(), 100);
+        column = new ColumnConfig("version", "Version", 100);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("network", DEVICE_MSGS.peerDeviceTableNetwork(), 140);
+        column = new ColumnConfig("network", "Network", 140);
         column.setSortable(false);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("signal", DEVICE_MSGS.peerDeviceTableSignal(), 80);
+        column = new ColumnConfig("clientIp", "IP", 110);
         column.setSortable(false);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("clientIp", DEVICE_MSGS.peerDeviceTableIp(), 110);
-        column.setSortable(false);
-        columnConfigs.add(column);
-
-        column = new ColumnConfig("hotSpotStatus", DEVICE_MSGS.peerDeviceTableAp(), 50);
+        column = new ColumnConfig("hotSpotStatus", "AP", 50);
         GridCellRenderer<GwtDevice> apRenderer = new GridCellRenderer<GwtDevice>() {
 
             @Override
@@ -180,7 +174,11 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
         column.setSortable(false);
         columnConfigs.add(column);
 
-        column = new ColumnConfig("standbyApp", DEVICE_MSGS.peerDeviceTableShowing(), 120);
+        column = new ColumnConfig("signal", "Signal", 80);
+        column.setSortable(false);
+        columnConfigs.add(column);
+
+        column = new ColumnConfig("standbyApp", "Showing", 120);
         column.setSortable(false);
         columnConfigs.add(column);
 

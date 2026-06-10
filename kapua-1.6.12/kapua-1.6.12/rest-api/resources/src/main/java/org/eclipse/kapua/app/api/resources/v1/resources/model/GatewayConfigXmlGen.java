@@ -12,6 +12,9 @@
  */
 package org.eclipse.kapua.app.api.resources.v1.resources.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.eclipse.kapua.common.util.GatewayConfig.GatewayConfigModel;
 
 /**
@@ -19,59 +22,33 @@ import org.eclipse.kapua.common.util.GatewayConfig.GatewayConfigModel;
  */
 public class GatewayConfigXmlGen {
 
-    private GatewayConfigModel gatewayConfig;
+    private final Words rootElements;
 
     public GatewayConfigXmlGen() {
+        rootElements = new Words();
     }
 
-    public GatewayConfigModel getGatewayConfig() {
-        return gatewayConfig;
-    }
+    public void setGatewayConfig(GatewayConfigModel model) {
+        rootElements.setValue("GatewayConfig");
 
-    public void setGatewayConfig(GatewayConfigModel gatewayConfig) {
-        this.gatewayConfig = gatewayConfig;
-    }
-
-    /**
-     * Builds the XML gateway configuration and wraps it in a {@link Words} response.
-     */
-    public Words build() {
-        Words result = new Words();
-        if (gatewayConfig == null) {
-            result.setValue("");
-            return result;
+        List<Word> elements = new ArrayList<>();
+        if (model != null) {
+            elements.add(genElement("ClientId", model.getDeviceName()));
+            elements.add(genElement("AccountName", model.getAccountName()));
+            elements.add(genElement("BrokerProtocol", model.getBrokerProtocol()));
+            elements.add(genElement("BrokerUser", model.getBrokerUser()));
+            elements.add(genElement("BrokerPassword", model.getBrokerPassword()));
+            elements.add(genElement("BrokerHost", model.getBrokerHost()));
+            elements.add(genElement("BrokerPort", model.getBrokerPort()));
         }
-        result.setValue(buildXml());
-        return result;
+        rootElements.setWords(elements);
     }
 
-    private String buildXml() {
-        String deviceName = nullSafe(gatewayConfig.getDeviceName());
-        String accountName = nullSafe(gatewayConfig.getAccountName());
-        String protocol = nullSafe(gatewayConfig.getBrokerProtocol());
-        String host = nullSafe(gatewayConfig.getBrokerHost());
-        String port = nullSafe(gatewayConfig.getBrokerPort());
-        String brokerUser = nullSafe(gatewayConfig.getBrokerUser());
-        String brokerPass = nullSafe(gatewayConfig.getBrokerPassword());
-
-        String clientId = accountName.isEmpty() ? deviceName : accountName + ":" + deviceName;
-
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-               "<gatewayConfig>\n" +
-               "  <deviceName>" + deviceName + "</deviceName>\n" +
-               "  <accountName>" + accountName + "</accountName>\n" +
-               "  <clientId>" + clientId + "</clientId>\n" +
-               "  <broker>\n" +
-               "    <protocol>" + protocol + "</protocol>\n" +
-               "    <host>" + host + "</host>\n" +
-               "    <port>" + port + "</port>\n" +
-               "    <username>" + brokerUser + "</username>\n" +
-               "    <password>" + brokerPass + "</password>\n" +
-               "  </broker>\n" +
-               "</gatewayConfig>";
+    public Words build() {
+        return rootElements;
     }
 
-    private String nullSafe(String value) {
-        return value != null ? value : "";
+    private Word genElement(String key, String value) {
+        return new Word(key, value != null ? value : "");
     }
 }

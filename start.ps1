@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 $ROOT        = $PSScriptRoot
 $COMPOSE_DIR = "$ROOT\kapua-1.6.12\kapua-1.6.12\deployment\docker\compose"
 $PATCH_DIR   = "$ROOT\kapua-api-patch"
+$CONSOLE_PATCH_DIR = "$ROOT\kapua-console-patch"
 $IMAGE_VER   = "1.6.12"
 $PROJECT     = "compose"
 
@@ -46,6 +47,26 @@ if (-not $patchedImg) {
     Write-OK "image 建立完成"
 } else {
     Write-OK "patch image 已是最新版本"
+}
+
+# ---- 2b. 同步 Console patch image ------------------------------------------
+Write-Step "檢查 kapua-console patch image..."
+$consolePatchedImg = docker images "kapua/kapua-console:1.6.12-patched" --format "{{.ID}}" 2>$null
+$consolePatchMtime = (Get-ChildItem $CONSOLE_PATCH_DIR | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
+if ($consolePatchedImg) {
+    $consoleImgCreated = [datetime](docker inspect "kapua/kapua-console:1.6.12-patched" --format "{{.Created}}" 2>$null)
+    if ($consolePatchMtime -gt $consoleImgCreated) {
+        Write-Warn "Console patch 檔案有更新，重新建立 image..."
+        $consolePatchedImg = $null
+    }
+}
+
+if (-not $consolePatchedImg) {
+    docker build -t "kapua/kapua-console:1.6.12-patched" $CONSOLE_PATCH_DIR
+    if ($LASTEXITCODE -ne 0) { Write-Fail "kapua-console docker build 失敗" }
+    Write-OK "Console image 建立完成"
+} else {
+    Write-OK "Console patch image 已是最新版本"
 }
 
 # ---- 3. 偵測容器狀態 -------------------------------------------------------

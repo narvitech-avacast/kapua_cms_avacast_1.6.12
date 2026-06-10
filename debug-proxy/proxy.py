@@ -329,6 +329,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 #overview{padding:10px 14px;border-bottom:1px solid var(--bd);flex-shrink:0}
 #ov-line1{font-size:.9rem;font-weight:600;color:var(--tx);margin-bottom:5px;word-break:break-all}
 #ov-line2{font-size:.78rem;color:var(--tx2);display:flex;gap:14px;flex-wrap:wrap}
+#device-result{display:none;margin-top:8px;padding:7px 9px;border-radius:5px;font-size:.78rem;font-weight:600}
+#device-result.ok{display:block;background:#1a3a28;color:var(--green);border:1px solid #286b3b}
+#device-result.warn{display:block;background:#3a2b10;color:var(--yellow);border:1px solid #765c1d}
+#device-result.err{display:block;background:#3a1515;color:var(--red);border:1px solid #7d2b2b}
 #tabs{display:flex;gap:0;border-bottom:1px solid var(--bd);flex-shrink:0}
 .tab{padding:7px 16px;font-size:.8rem;cursor:pointer;color:var(--tx2);border-bottom:2px solid transparent;transition:all .15s}
 .tab.on{color:var(--blue);border-bottom-color:var(--blue)}
@@ -385,6 +389,7 @@ table.hdrs tr:nth-child(even) td{background:#0f131a}
       <div id="overview">
         <div id="ov-line1"></div>
         <div id="ov-line2"></div>
+        <div id="device-result"></div>
       </div>
       <div id="tabs">
         <div class="tab on" data-t="req">Request</div>
@@ -472,7 +477,32 @@ function select(id) {
     d.req_headers?.['x-real-ip'] || d.req_headers?.['X-Real-IP'] ? `IP: ${d.req_headers['x-real-ip']||d.req_headers['X-Real-IP']}` : '',
   ].filter(Boolean).join('&ensp;·&ensp;');
 
+  renderDeviceResult(d);
   renderTab(d);
+}
+
+function renderDeviceResult(d) {
+  const box = $('device-result');
+  box.className = '';
+  box.textContent = '';
+  if (!d.path?.includes('/devicesNoAuth/getAndroidGatewayConfigByAccessToken')) return;
+
+  const response = d.res_body || '';
+  if (response.includes('"value": "GatewayConfig"') ||
+      response.includes('"value":"GatewayConfig"') ||
+      response.includes('value="GatewayConfig"')) {
+    box.className = 'ok';
+    box.textContent = 'CMS 已收到：裝置新增成功，Gateway Config 已回傳';
+  } else if (response.includes('5200:USER_NOT_FIND')) {
+    box.className = 'warn';
+    box.textContent = 'CMS 已收到：裝置請求已處理，但找不到 Broker User，Gateway Config 產生失敗';
+  } else if (response.includes('401:INVALID_OR_EXPIRED_DEVICE_TOKEN')) {
+    box.className = 'err';
+    box.textContent = 'CMS 已收到：Registration Token 無效、過期或已使用';
+  } else if (d.res_status) {
+    box.className = d.res_status < 400 ? 'warn' : 'err';
+    box.textContent = `CMS 已收到：請查看 Response Body（HTTP ${d.res_status}）`;
+  }
 }
 
 /* ── Tabs ───────────────────────────────────────────────── */

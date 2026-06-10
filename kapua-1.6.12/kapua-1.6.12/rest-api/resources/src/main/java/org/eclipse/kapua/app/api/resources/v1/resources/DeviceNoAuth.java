@@ -18,6 +18,7 @@ import org.eclipse.kapua.app.api.core.resources.AbstractKapuaResource;
 import org.eclipse.kapua.app.api.resources.v1.resources.model.DeviceRegistrationTokenStore;
 import org.eclipse.kapua.app.api.resources.v1.resources.model.GatewayConfigXmlGen;
 import org.eclipse.kapua.app.api.resources.v1.resources.model.Words;
+import org.eclipse.kapua.broker.BrokerDomains;
 import org.eclipse.kapua.common.util.GatewayConfig.GatewayConfigModel;
 import org.eclipse.kapua.commons.responeCode.AccountResponseCode;
 import org.eclipse.kapua.commons.responeCode.DeviceResponseCode;
@@ -25,18 +26,34 @@ import org.eclipse.kapua.commons.security.KapuaSecurityUtils;
 import org.eclipse.kapua.commons.setting.system.SystemSetting;
 import org.eclipse.kapua.commons.setting.system.SystemSettingKey;
 import org.eclipse.kapua.locator.KapuaLocator;
+import org.eclipse.kapua.model.domain.Actions;
 import org.eclipse.kapua.service.account.Account;
 import org.eclipse.kapua.service.account.AccountService;
+import org.eclipse.kapua.service.authentication.credential.Credential;
+import org.eclipse.kapua.service.authentication.credential.CredentialCreator;
+import org.eclipse.kapua.service.authentication.credential.CredentialFactory;
+import org.eclipse.kapua.service.authentication.credential.CredentialListResult;
+import org.eclipse.kapua.service.authentication.credential.CredentialService;
+import org.eclipse.kapua.service.authentication.credential.CredentialStatus;
+import org.eclipse.kapua.service.authentication.credential.CredentialType;
+import org.eclipse.kapua.service.authorization.access.AccessInfo;
+import org.eclipse.kapua.service.authorization.access.AccessInfoCreator;
+import org.eclipse.kapua.service.authorization.access.AccessInfoFactory;
+import org.eclipse.kapua.service.authorization.access.AccessInfoService;
+import org.eclipse.kapua.service.authorization.permission.Permission;
+import org.eclipse.kapua.service.authorization.permission.PermissionFactory;
 import org.eclipse.kapua.service.device.management.gatewayconfig.DeviceTokenGenGatewayconfig;
 import org.eclipse.kapua.service.device.registry.Device;
 import org.eclipse.kapua.service.device.registry.DeviceCreator;
 import org.eclipse.kapua.service.device.registry.DeviceFactory;
 import org.eclipse.kapua.service.device.registry.DeviceRegistryService;
 import org.eclipse.kapua.service.user.User;
+import org.eclipse.kapua.service.user.UserCreator;
 import org.eclipse.kapua.service.user.UserFactory;
 import org.eclipse.kapua.service.user.UserListResult;
 import org.eclipse.kapua.service.user.UserQuery;
 import org.eclipse.kapua.service.user.UserService;
+import org.eclipse.kapua.service.user.UserType;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
@@ -46,6 +63,8 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
+import java.util.HashSet;
+import java.util.Set;
 
 @Path("devicesNoAuth")
 public class DeviceNoAuth extends AbstractKapuaResource {
@@ -59,6 +78,13 @@ public class DeviceNoAuth extends AbstractKapuaResource {
     private final UserFactory userFactory = locator.getFactory(UserFactory.class);
 
     private final AccountService accountService = locator.getService(AccountService.class);
+
+    private final CredentialService credentialService = locator.getService(CredentialService.class);
+    private final CredentialFactory credentialFactory = locator.getFactory(CredentialFactory.class);
+
+    private final AccessInfoService accessInfoService = locator.getService(AccessInfoService.class);
+    private final AccessInfoFactory accessInfoFactory = locator.getFactory(AccessInfoFactory.class);
+    private final PermissionFactory permissionFactory = locator.getFactory(PermissionFactory.class);
 
     @Context
     private HttpHeaders headers;
@@ -198,7 +224,8 @@ public class DeviceNoAuth extends AbstractKapuaResource {
         }
     }
 
-    private User findBrokerUser(org.eclipse.kapua.model.id.KapuaId scopeId) throws KapuaException {
+    private User findBrokerUser(org.eclipse.kapua.model.id.KapuaId scopeId, String brokerUserName)
+            throws KapuaException {
         UserQuery query = KapuaSecurityUtils.doPrivileged(
                 () -> userFactory.newQuery(scopeId));
         UserListResult userList = KapuaSecurityUtils.doPrivileged(
@@ -209,11 +236,77 @@ public class DeviceNoAuth extends AbstractKapuaResource {
         }
         for (int i = 0; i < userList.getSize(); i++) {
             User user = userList.getItem(i);
-            if (user.getName() != null && user.getName().endsWith("-broker")) {
+            if (brokerUserName.equals(user.getName())) {
                 return user;
             }
         }
         return null;
+    }
+
+    private synchronized User ensureBrokerUser(Account account) throws KapuaException {
+        String accountName = account.getName();
+        String brokerUserName = accountName + "-broker";
+        User brokerUser = findBrokerUser(account.getId(), brokerUserName);
+
+        if (brokerUser == null) {
+            UserCreator userCreator = KapuaSecurityUtils.doPrivileged(
+                    () -> userFactory.newCreator(account.getId(), brokerUserName));
+            userCreator.setUserType(UserType.INTERNAL);
+            userCreator.setDisplayName("Gateway User");
+            brokerUser = KapuaSecurityUtils.doPrivileged(
+                    () -> userService.create(userCreator));
+        }
+
+        ensureBrokerAccess(brokerUser);
+        ensureBrokerCredential(account, brokerUser);
+        return brokerUser;
+    }
+
+    private void ensureBrokerAccess(User brokerUser) throws KapuaException {
+        AccessInfo accessInfo = KapuaSecurityUtils.doPrivileged(
+                () -> accessInfoService.findByUserId(brokerUser.getScopeId(), brokerUser.getId()));
+        if (accessInfo != null) {
+            return;
+        }
+
+        AccessInfoCreator accessInfoCreator = KapuaSecurityUtils.doPrivileged(
+                () -> accessInfoFactory.newCreator(brokerUser.getScopeId()));
+        accessInfoCreator.setUserId(brokerUser.getId());
+
+        Set<Permission> permissions = new HashSet<>();
+        permissions.add(KapuaSecurityUtils.doPrivileged(
+                () -> permissionFactory.newPermission(
+                        BrokerDomains.BROKER_DOMAIN,
+                        Actions.connect,
+                        brokerUser.getScopeId())));
+        accessInfoCreator.setPermissions(permissions);
+
+        KapuaSecurityUtils.doPrivileged(
+                () -> accessInfoService.create(accessInfoCreator));
+    }
+
+    private void ensureBrokerCredential(Account account, User brokerUser) throws KapuaException {
+        CredentialListResult credentials = KapuaSecurityUtils.doPrivileged(
+                () -> credentialService.findByUserId(brokerUser.getScopeId(), brokerUser.getId()));
+        if (credentials != null) {
+            for (int i = 0; i < credentials.getSize(); i++) {
+                Credential credential = credentials.getItem(i);
+                if (CredentialType.PASSWORD.equals(credential.getCredentialType())) {
+                    return;
+                }
+            }
+        }
+
+        CredentialCreator credentialCreator = KapuaSecurityUtils.doPrivileged(
+                () -> credentialFactory.newCreator(
+                        account.getId(),
+                        brokerUser.getId(),
+                        CredentialType.PASSWORD,
+                        defaultBrokerPassword(account.getName()),
+                        CredentialStatus.ENABLED,
+                        null));
+        KapuaSecurityUtils.doPrivileged(
+                () -> credentialService.create(credentialCreator));
     }
 
     private GatewayConfigModel buildGatewayConfigModel(Device device, SystemSetting systemSetting)
@@ -222,23 +315,19 @@ public class DeviceNoAuth extends AbstractKapuaResource {
         GatewayConfigModel gcm = new GatewayConfigModel();
         gcm.setDeviceName(device.getClientId());
 
-        User brokerUser = findBrokerUser(device.getScopeId());
-        if (brokerUser == null) {
+        Account account = KapuaSecurityUtils.doPrivileged(
+                () -> accountService.find(device.getScopeId()));
+        if (account == null) {
             return null;
         }
 
+        User brokerUser = ensureBrokerUser(account);
         gcm.setBrokerUser(brokerUser.getName());
         gcm.setBrokerHost(resolveBrokerHost(systemSetting));
         gcm.setBrokerPort(systemSetting.getString(SystemSettingKey.BROKER_PORT, "1883"));
         gcm.setBrokerProtocol(systemSetting.getString(SystemSettingKey.BROKER_SCHEME));
-
-        Account account = KapuaSecurityUtils.doPrivileged(
-                () -> accountService.find(brokerUser.getScopeId()));
-        if (account != null) {
-            gcm.setAccountName(account.getName());
-        }
-
-        gcm.setBrokerPassword(resolveBrokerPassword(systemSetting, brokerUser));
+        gcm.setAccountName(account.getName());
+        gcm.setBrokerPassword(resolveBrokerPassword(systemSetting, account, brokerUser));
 
         return gcm;
     }
@@ -293,14 +382,21 @@ public class DeviceNoAuth extends AbstractKapuaResource {
         return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host);
     }
 
-    private String resolveBrokerPassword(SystemSetting systemSetting, User brokerUser) {
+    private String resolveBrokerPassword(SystemSetting systemSetting, Account account, User brokerUser) {
+        if (!"kapua-broker".equals(brokerUser.getName())) {
+            return defaultBrokerPassword(account.getName());
+        }
+
         String configuredPassword = systemSetting.getString(SystemSettingKey.BROKER_PASSWORD, "");
         if (!isBlank(configuredPassword)) {
             return configuredPassword;
         }
 
-        String accountBaseName = brokerUser.getName().replace("-broker", "");
-        return accountBaseName + "-Password1!";
+        return defaultBrokerPassword(account.getName());
+    }
+
+    private String defaultBrokerPassword(String accountName) {
+        return accountName + "-Password1!";
     }
 
     private boolean isBlank(String value) {

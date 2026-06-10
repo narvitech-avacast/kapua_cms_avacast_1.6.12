@@ -12,8 +12,11 @@
  */
 package org.eclipse.kapua.app.api.resources.v1.resources.model;
 
+import java.util.List;
+
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlRootElement;
 
@@ -21,8 +24,11 @@ import javax.xml.bind.annotation.XmlRootElement;
 @XmlAccessorType(XmlAccessType.FIELD)
 public class Words {
 
-    @XmlElement(name = "value")
+    @XmlAttribute(name = "value")
     private String value;
+
+    @XmlElement(name = "word")
+    private List<Word> words;
 
     public Words() {
     }
@@ -37,5 +43,13 @@ public class Words {
 
     public void setValue(String value) {
         this.value = value;
+    }
+
+    public List<Word> getWords() {
+        return words;
+    }
+
+    public void setWords(List<Word> words) {
+        this.words = words;
     }
 }

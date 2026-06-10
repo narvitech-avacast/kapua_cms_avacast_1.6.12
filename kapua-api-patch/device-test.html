@@ -538,12 +538,13 @@ async function doNoAuthTest() {
     const data = await res.json();
 
     setStep(3);
-    const xmlStr = data.value || JSON.stringify(data, null, 2);
-    if (/^\d{3,4}:/.test(xmlStr)) throw new Error(xmlStr);
-    document.getElementById('gatewayConfigBox').textContent = xmlStr;
+    const responseValue = data.value || '';
+    if (/^\d{3,4}:/.test(responseValue)) throw new Error(responseValue);
+    document.getElementById('gatewayConfigBox').textContent = JSON.stringify(data, null, 2);
 
-    // Parse MQTT info from XML
-    const mqttInfo = parseMqttFromXml(xmlStr);
+    const mqttInfo = Array.isArray(data.words)
+      ? Object.fromEntries(data.words.map(item => [item.key, item.value]))
+      : parseMqttFromXml(responseValue);
     if (mqttInfo) {
       setStep(4);
       document.getElementById('mqttInfo').style.display = 'block';

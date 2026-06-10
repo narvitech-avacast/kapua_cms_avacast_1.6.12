@@ -14,6 +14,10 @@ COPY kapua-gatewayconfig-custom.jar \
 COPY kapua-api-resources-running.jar \
      /var/opt/jetty/webapps/root/WEB-INF/lib/kapua-rest-api-resources-1.6.12.jar
 
+# DeviceNoAuth provisions broker:connect permission for accounts that predate broker-user creation.
+COPY kapua-broker-api-1.6.12.jar \
+     /var/opt/jetty/webapps/root/WEB-INF/lib/kapua-broker-api-1.6.12.jar
+
 COPY device-test.html /var/opt/jetty/webapps/root/device-test.html
 
 RUN chown -R 1000:0 /var/opt/jetty/webapps/root/WEB-INF && \
