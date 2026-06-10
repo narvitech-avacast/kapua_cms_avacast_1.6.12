@@ -29,23 +29,21 @@ import com.google.gwt.json.client.JSONParser;
 import com.google.gwt.json.client.JSONValue;
 import com.google.gwt.user.client.Element;
 import com.google.gwt.user.client.Timer;
-import com.google.gwt.user.client.ui.TextBox;
 import org.eclipse.kapua.app.console.module.api.shared.model.session.GwtSession;
 
 public class DeviceTokenDialog extends Dialog {
 
     private final GwtSession currentSession;
 
-    private TextBox tokenField;
-    private Button copyBtn;
+    // Buttons declared as fields so they can be referenced after onRender
     private Button generateBtn;
     private Button cancelBtn;
-    private Text statusText;
+    private LayoutContainer bodyArea;
 
     public DeviceTokenDialog(GwtSession currentSession) {
         this.currentSession = currentSession;
 
-        setHeading("Add Device");
+        setHeading("產生裝置配對 Token");
         setModal(true);
         setResizable(false);
         setClosable(true);
@@ -54,85 +52,9 @@ public class DeviceTokenDialog extends Dialog {
         setButtonAlign(HorizontalAlignment.CENTER);
         setWidth(480);
         setAutoHeight(true);
-    }
 
-    @Override
-    protected void onRender(Element parent, int pos) {
-        super.onRender(parent, pos);
-
-        // Description
-        Text desc = new Text("產生一次性配對 Token，將 Token 輸入裝置後即可完成配對。");
-        desc.setStyleAttribute("display", "block");
-        desc.setStyleAttribute("padding", "12px 16px 6px 16px");
-        desc.setStyleAttribute("color", "#555");
-        desc.setStyleAttribute("font-size", "13px");
-        add(desc);
-
-        // Token field row: [TextBox] [Copy Button]
-        LayoutContainer tokenRow = new LayoutContainer();
-        tokenRow.setStyleAttribute("padding", "6px 16px");
-        TableLayout tl = new TableLayout(2);
-        tokenRow.setLayout(tl);
-
-        tokenField = new TextBox();
-        tokenField.setReadOnly(true);
-        tokenField.setWidth("370px");
-        tokenField.getElement().getStyle().setProperty("fontFamily", "monospace");
-        tokenField.getElement().getStyle().setProperty("fontSize", "12px");
-        tokenField.getElement().getStyle().setProperty("padding", "5px 8px");
-        tokenField.getElement().getStyle().setProperty("border", "1px solid #ccc");
-        tokenField.getElement().getStyle().setProperty("borderRadius", "4px");
-        tokenField.getElement().getStyle().setProperty("background", "#f8f9fa");
-        tokenField.getElement().getStyle().setProperty("color", "#1a73e8");
-
-        TableData tdField = new TableData();
-        tdField.setPadding(2);
-        tokenRow.add(tokenField, tdField);
-
-        copyBtn = new Button("複製");
-        copyBtn.setStyleAttribute("margin-left", "6px");
-        copyBtn.setEnabled(false);
-        copyBtn.addSelectionListener(new SelectionListener<ButtonEvent>() {
-            @Override
-            public void componentSelected(ButtonEvent ce) {
-                String token = tokenField.getValue();
-                if (token != null && !token.isEmpty()) {
-                    copyToClipboard(token);
-                    copyBtn.setText("✓ 已複製");
-                    new Timer() {
-                        @Override
-                        public void run() {
-                            copyBtn.setText("複製");
-                        }
-                    }.schedule(1500);
-                }
-            }
-        });
-
-        TableData tdCopy = new TableData();
-        tdCopy.setPadding(2);
-        tokenRow.add(copyBtn, tdCopy);
-
-        add(tokenRow);
-
-        // Status / error text
-        statusText = new Text("");
-        statusText.setStyleAttribute("display", "block");
-        statusText.setStyleAttribute("padding", "4px 16px");
-        statusText.setStyleAttribute("color", "red");
-        statusText.setStyleAttribute("font-size", "12px");
-        statusText.setStyleAttribute("min-height", "18px");
-        add(statusText);
-
-        // Buttons: Generate | Cancel
-        generateBtn = new Button("產生 Token");
-        generateBtn.addSelectionListener(new SelectionListener<ButtonEvent>() {
-            @Override
-            public void componentSelected(ButtonEvent ce) {
-                generateToken();
-            }
-        });
-
+        // Buttons MUST be added in constructor — adding after super.onRender() causes
+        // them to be silently dropped because the GXT button bar is already rendered.
         cancelBtn = new Button("取消");
         cancelBtn.addSelectionListener(new SelectionListener<ButtonEvent>() {
             @Override
@@ -141,19 +63,49 @@ public class DeviceTokenDialog extends Dialog {
             }
         });
 
-        addButton(generateBtn);
+        generateBtn = new Button("產生 Token");
+        generateBtn.addSelectionListener(new SelectionListener<ButtonEvent>() {
+            @Override
+            public void componentSelected(ButtonEvent ce) {
+                generateToken();
+            }
+        });
+
         addButton(cancelBtn);
+        addButton(generateBtn);
     }
+
+    @Override
+    protected void onRender(Element parent, int pos) {
+        super.onRender(parent, pos);
+
+        // Single container we can wipe and repopulate without touching the button bar
+        bodyArea = new LayoutContainer();
+        add(bodyArea);
+
+        showInitialView();
+    }
+
+    // ── View: initial ────────────────────────────────────────────
+
+    private void showInitialView() {
+        bodyArea.removeAll();
+
+        bodyArea.add(buildInfoBox(
+                "系統會產生一組短效一次性 Token。裝置輸入後，回傳 Token 與自己的 Client ID，CMS 驗證成功才建立裝置。"));
+
+        bodyArea.layout(true);
+        syncSize();
+    }
+
+    // ── Token generation ─────────────────────────────────────────
 
     private void generateToken() {
         generateBtn.setEnabled(false);
         generateBtn.setText("產生中...");
-        copyBtn.setEnabled(false);
-        tokenField.setValue("");
-        statusText.setText("");
 
-        String scopeId = URL.encodePathSegment(currentSession.getSelectedAccountId());
-        String apiUrl = "/v1/" + scopeId + "/devices/registrationToken";
+        String scopeIdEnc = URL.encodePathSegment(currentSession.getSelectedAccountId());
+        String apiUrl = "/v1/" + scopeIdEnc + "/devices/registrationToken";
 
         RequestBuilder rb = new RequestBuilder(RequestBuilder.POST, apiUrl);
         rb.setHeader("Authorization", "Bearer " + currentSession.getTokenId());
@@ -173,17 +125,15 @@ public class DeviceTokenDialog extends Dialog {
                             JSONObject obj = json.isObject();
                             if (obj != null && obj.get("value") != null
                                     && obj.get("value").isString() != null) {
-                                String token = obj.get("value").isString().stringValue();
-                                tokenField.setValue(token);
-                                copyBtn.setEnabled(true);
+                                showSuccessView(obj.get("value").isString().stringValue());
                             } else {
-                                statusText.setText("無效的回應格式");
+                                addError("無效的回應格式");
                             }
                         } catch (Exception e) {
-                            statusText.setText("解析回應失敗");
+                            addError("解析回應失敗");
                         }
                     } else {
-                        statusText.setText("產生失敗：HTTP " + response.getStatusCode());
+                        addError("產生失敗：HTTP " + response.getStatusCode());
                     }
                 }
 
@@ -191,14 +141,150 @@ public class DeviceTokenDialog extends Dialog {
                 public void onError(Request request, Throwable exception) {
                     generateBtn.setEnabled(true);
                     generateBtn.setText("產生 Token");
-                    statusText.setText("請求失敗：" + exception.getMessage());
+                    addError("請求失敗：" + exception.getMessage());
                 }
             });
         } catch (RequestException e) {
             generateBtn.setEnabled(true);
             generateBtn.setText("產生 Token");
-            statusText.setText("請求失敗：" + e.getMessage());
+            addError("請求失敗：" + e.getMessage());
         }
+    }
+
+    // ── View: success ────────────────────────────────────────────
+
+    private void showSuccessView(final String token) {
+        bodyArea.removeAll();
+
+        // ✓ Success header
+        LayoutContainer successBox = new LayoutContainer();
+        successBox.setStyleAttribute("background", "#e6f4ea");
+        successBox.setStyleAttribute("border-radius", "8px");
+        successBox.setStyleAttribute("padding", "16px");
+        successBox.setStyleAttribute("margin", "16px 16px 8px 16px");
+        successBox.setStyleAttribute("text-align", "center");
+
+        Text title = new Text("✓ 配對 Token 已產生");
+        title.setStyleAttribute("font-size", "15px");
+        title.setStyleAttribute("font-weight", "bold");
+        title.setStyleAttribute("color", "#188038");
+        title.setStyleAttribute("display", "block");
+        title.setStyleAttribute("margin-bottom", "6px");
+        successBox.add(title);
+
+        Text subtitle = new Text("請將以下資訊輸入裝置");
+        subtitle.setStyleAttribute("font-size", "12px");
+        subtitle.setStyleAttribute("color", "#555");
+        subtitle.setStyleAttribute("display", "block");
+        successBox.add(subtitle);
+        bodyArea.add(successBox);
+
+        // Token value box
+        bodyArea.add(buildValueBox("配對 Token（一次性）", token));
+
+        // Scope ID value box
+        bodyArea.add(buildValueBox("Scope ID（帳號 ID）", currentSession.getSelectedAccountId()));
+
+        // Footer: replace [取消][產生 Token] → [完成]
+        getButtonBar().removeAll();
+        Button doneBtn = new Button("完成");
+        doneBtn.addSelectionListener(new SelectionListener<ButtonEvent>() {
+            @Override
+            public void componentSelected(ButtonEvent ce) {
+                hide();
+            }
+        });
+        getButtonBar().add(doneBtn);
+        getButtonBar().layout();
+
+        bodyArea.layout(true);
+        syncSize();
+    }
+
+    // ── Error handling ───────────────────────────────────────────
+
+    private void addError(String message) {
+        LayoutContainer errorBox = new LayoutContainer();
+        errorBox.setStyleAttribute("background", "#fce8e6");
+        errorBox.setStyleAttribute("border", "1px solid #f5c6c2");
+        errorBox.setStyleAttribute("border-radius", "7px");
+        errorBox.setStyleAttribute("padding", "10px 14px");
+        errorBox.setStyleAttribute("margin", "0 16px 8px 16px");
+
+        Text errorText = new Text(message);
+        errorText.setStyleAttribute("font-size", "12px");
+        errorText.setStyleAttribute("color", "#c5221f");
+        errorBox.add(errorText);
+        bodyArea.add(errorBox);
+
+        bodyArea.layout(true);
+        syncSize();
+    }
+
+    // ── Widget builders ──────────────────────────────────────────
+
+    private LayoutContainer buildInfoBox(String message) {
+        LayoutContainer box = new LayoutContainer();
+        box.setStyleAttribute("background", "#e8f0fe");
+        box.setStyleAttribute("border", "1px solid #c5d9f8");
+        box.setStyleAttribute("border-radius", "7px");
+        box.setStyleAttribute("padding", "10px 14px");
+        box.setStyleAttribute("margin", "16px");
+
+        Text text = new Text(message);
+        text.setStyleAttribute("font-size", "13px");
+        text.setStyleAttribute("color", "#1a73e8");
+        box.add(text);
+
+        return box;
+    }
+
+    private LayoutContainer buildValueBox(String labelStr, final String value) {
+        LayoutContainer box = new LayoutContainer();
+        box.setStyleAttribute("background", "#f8f9fa");
+        box.setStyleAttribute("border", "1px solid #dee2e6");
+        box.setStyleAttribute("border-radius", "8px");
+        box.setStyleAttribute("padding", "14px 16px");
+        box.setStyleAttribute("margin", "0 16px 8px 16px");
+
+        Text label = new Text(labelStr);
+        label.setStyleAttribute("font-size", "11px");
+        label.setStyleAttribute("color", "#888");
+        label.setStyleAttribute("display", "block");
+        label.setStyleAttribute("margin-bottom", "6px");
+        box.add(label);
+
+        LayoutContainer row = new LayoutContainer();
+        row.setLayout(new TableLayout(2));
+
+        Text val = new Text(value);
+        val.setStyleAttribute("font-family", "Courier New, monospace");
+        val.setStyleAttribute("font-size", "13px");
+        val.setStyleAttribute("color", "#1a73e8");
+        val.setStyleAttribute("word-break", "break-all");
+        TableData tdVal = new TableData();
+        tdVal.setWidth("380px");
+        row.add(val, tdVal);
+
+        final Button copyBtn = new Button("複製"); // 複製
+        copyBtn.setStyleAttribute("margin-left", "8px");
+        copyBtn.addSelectionListener(new SelectionListener<ButtonEvent>() {
+            @Override
+            public void componentSelected(ButtonEvent ce) {
+                copyToClipboard(value);
+                copyBtn.setText("✓ 已複製"); // ✓ 已複製
+                new Timer() {
+                    @Override
+                    public void run() {
+                        copyBtn.setText("複製"); // 複製
+                    }
+                }.schedule(1500);
+            }
+        });
+        row.add(copyBtn, new TableData());
+        box.add(row);
+
+        return box;
     }
 
     private static native void copyToClipboard(String text) /*-{
