@@ -121,5 +121,11 @@
             <groupId>org.eclipse.kapua</groupId>
             <artifactId>kapua-device-management-api</artifactId>
         </dependency>
+
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>
