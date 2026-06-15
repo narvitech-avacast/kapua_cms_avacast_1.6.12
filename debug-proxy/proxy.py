@@ -82,7 +82,7 @@ def _store_token(path: str, res_body: str):
         pass
 
 def _enrich_no_auth(req_raw: bytes) -> tuple[bytes, dict]:
-    """Inject missing scopeId / clientId into devicesNoAuth request body."""
+    """Inject a missing scopeId into a devicesNoAuth request body."""
     injected = {}
     try:
         body = json.loads(req_raw)
@@ -96,12 +96,6 @@ def _enrich_no_auth(req_raw: bytes) -> tuple[bytes, dict]:
             body["scopeId"] = scope_id
             injected["scopeId"] = scope_id
 
-    if not body.get("clientId") and body.get("accessToken"):
-        token = body["accessToken"]
-        cid = "tx-" + token.replace("-", "").replace("_", "")[-12:]
-        body["clientId"] = cid
-        injected["clientId"] = cid
-
     if injected:
         print(f"[enrich] injected {injected} into devicesNoAuth request", flush=True)
         return json.dumps(body, ensure_ascii=False).encode(), injected
@@ -112,7 +106,25 @@ def _enrich_no_auth(req_raw: bytes) -> tuple[bytes, dict]:
 
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
 
+    def _json_response(self, obj, status=200):
+        body = json.dumps(obj, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
     def handle_any(self):
+        # ── /mqtt-presence — real-time device online/offline status ──────────
+        if self.path == "/mqtt-presence" or self.path.startswith("/mqtt-presence?"):
+            import mqtt_subscriber
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            cid = qs.get("clientId", [None])[0]
+            self._json_response(mqtt_subscriber.get_presence(cid))
+            return
+
         entry = {
             "ts"          : datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
             "method"      : self.command,

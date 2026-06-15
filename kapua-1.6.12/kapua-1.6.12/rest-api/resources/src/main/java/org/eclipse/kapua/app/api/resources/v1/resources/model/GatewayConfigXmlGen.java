@@ -33,13 +33,21 @@ public class GatewayConfigXmlGen {
 
         List<Word> elements = new ArrayList<>();
         if (model != null) {
-            elements.add(genElement("ClientId", model.getDeviceName()));
-            elements.add(genElement("AccountName", model.getAccountName()));
+            String clientId    = model.getDeviceName();
+            String accountName = model.getAccountName();
+            elements.add(genElement("ClientId", clientId));
+            elements.add(genElement("AccountName", accountName));
             elements.add(genElement("BrokerProtocol", model.getBrokerProtocol()));
             elements.add(genElement("BrokerUser", model.getBrokerUser()));
             elements.add(genElement("BrokerPassword", model.getBrokerPassword()));
             elements.add(genElement("BrokerHost", model.getBrokerHost()));
             elements.add(genElement("BrokerPort", model.getBrokerPort()));
+            // Computed from AccountName + ClientId; device subscribes to this topic
+            String subscribeTopic = (accountName != null && !accountName.isEmpty()
+                    && clientId != null && !clientId.isEmpty())
+                    ? "$EDC/" + accountName + "/" + clientId + "/#"
+                    : "";
+            elements.add(genElement("SubscribeTopic", subscribeTopic));
         }
         rootElements.setWords(elements);
     }

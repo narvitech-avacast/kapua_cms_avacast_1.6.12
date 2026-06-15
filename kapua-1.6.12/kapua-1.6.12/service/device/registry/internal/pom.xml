@@ -57,5 +57,12 @@
             <groupId>org.eclipse.kapua</groupId>
             <artifactId>kapua-tag-api</artifactId>
         </dependency>
+        <!-- Paho MQTT client - provided by the broker at runtime (lib/extra/) -->
+        <dependency>
+            <groupId>org.eclipse.paho</groupId>
+            <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
+            <version>1.2.1</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 </project>

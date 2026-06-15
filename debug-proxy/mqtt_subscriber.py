@@ -2,6 +2,7 @@
 """
 MQTT subscriber: connects to the Kapua broker and forwards all messages
 to the debug-proxy UI via the shared record() callback.
+Also tracks real-time device presence via BIRTH / DISCONNECT messages.
 """
 import json, os, threading, time
 from datetime import datetime, timezone
@@ -14,12 +15,82 @@ SUBSCRIBE   = os.environ.get("MQTT_TOPICS", "#")
 
 _record_fn = None
 
+# ── Device presence tracking ─────────────────────────────────────────────────
+# Key: clientId (str)
+# Value: {"status": "ONLINE"|"OFFLINE", "account": str, "clientId": str,
+#         "ts": float, "topic": str}
+_presence: dict = {}
+_presence_lock  = threading.Lock()
+
+OFFLINE_TIMEOUT = 120  # seconds — mark UNKNOWN after this long with no message
+
+
+def get_presence(client_id: str = None) -> dict:
+    """
+    Return presence dict for one clientId, or all devices.
+    Adds computed 'lastSeenAgo' (seconds) and degrades ONLINE → UNKNOWN on timeout.
+    """
+    now = time.time()
+    with _presence_lock:
+        snapshot = dict(_presence)
+
+    result = {}
+    for cid, info in snapshot.items():
+        entry = dict(info)
+        entry["lastSeenAgo"] = int(now - info["ts"])
+        if entry["status"] == "ONLINE" and entry["lastSeenAgo"] > OFFLINE_TIMEOUT:
+            entry["status"] = "UNKNOWN"
+        result[cid] = entry
+
+    if client_id is not None:
+        return result.get(client_id, {"status": "UNKNOWN", "clientId": client_id,
+                                      "account": "", "ts": 0, "lastSeenAgo": -1,
+                                      "topic": ""})
+    return result
+
+
+def _update_presence(topic: str):
+    """Parse $EDC/{account}/{clientId}/MQTT/{type} and update presence table."""
+    parts = topic.split("/")
+    # Expected: ["$EDC", account, clientId, "MQTT", type, ...]
+    if len(parts) < 5 or parts[0] != "$EDC" or parts[3] != "MQTT":
+        return
+    account   = parts[1]
+    client_id = parts[2]
+    msg_type  = parts[4].upper()   # BIRTH, DISCONNECT, CONNECT, …
+
+    now = time.time()
+    with _presence_lock:
+        if msg_type == "DISCONNECT":
+            _presence[client_id] = {
+                "status": "OFFLINE", "account": account,
+                "clientId": client_id, "ts": now, "topic": topic,
+            }
+        elif msg_type == "BIRTH":
+            _presence[client_id] = {
+                "status": "ONLINE", "account": account,
+                "clientId": client_id, "ts": now, "topic": topic,
+            }
+        else:
+            # Any other app message → device is alive; keep status, update ts
+            if client_id in _presence:
+                _presence[client_id]["ts"]    = now
+                _presence[client_id]["topic"] = topic
+                if _presence[client_id]["status"] == "OFFLINE":
+                    pass  # keep OFFLINE until we see a new BIRTH
+            else:
+                _presence[client_id] = {
+                    "status": "ONLINE", "account": account,
+                    "clientId": client_id, "ts": now, "topic": topic,
+                }
+
+
+# ── MQTT callbacks ────────────────────────────────────────────────────────────
 
 def _try_decode(payload: bytes) -> str:
     """Try UTF-8 text, then hex dump for binary."""
     try:
         text = payload.decode("utf-8")
-        # Pretty-print if it looks like JSON
         try:
             return json.dumps(json.loads(text), ensure_ascii=False, indent=2)
         except Exception:
@@ -29,6 +100,8 @@ def _try_decode(payload: bytes) -> str:
 
 
 def _on_message(client, userdata, msg):
+    _update_presence(msg.topic)
+
     if not _record_fn:
         return
     ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]

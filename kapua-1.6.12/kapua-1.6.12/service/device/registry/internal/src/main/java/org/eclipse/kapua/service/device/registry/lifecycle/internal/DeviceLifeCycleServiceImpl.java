@@ -33,11 +33,11 @@ import org.eclipse.kapua.message.internal.device.lifecycle.model.BirthExtendedPr
 import org.eclipse.kapua.message.internal.device.lifecycle.model.BirthExtendedProperty;
 import org.eclipse.kapua.model.KapuaEntity;
 import org.eclipse.kapua.model.id.KapuaId;
+import org.eclipse.kapua.service.account.Account;
+import org.eclipse.kapua.service.account.AccountService;
 import org.eclipse.kapua.service.device.management.message.response.KapuaResponseCode;
 import org.eclipse.kapua.service.device.registry.Device;
-import org.eclipse.kapua.service.device.registry.DeviceCreator;
 import org.eclipse.kapua.service.device.registry.DeviceExtendedProperty;
-import org.eclipse.kapua.service.device.registry.DeviceFactory;
 import org.eclipse.kapua.service.device.registry.DeviceRegistryService;
 import org.eclipse.kapua.service.device.registry.connection.DeviceConnection;
 import org.eclipse.kapua.service.device.registry.event.DeviceEvent;
@@ -46,11 +46,19 @@ import org.eclipse.kapua.service.device.registry.event.DeviceEventFactory;
 import org.eclipse.kapua.service.device.registry.event.DeviceEventService;
 import org.eclipse.kapua.service.device.registry.internal.DeviceExtendedPropertyImpl;
 import org.eclipse.kapua.service.device.registry.lifecycle.DeviceLifeCycleService;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 import javax.validation.constraints.NotNull;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -80,7 +88,16 @@ public class DeviceLifeCycleServiceImpl implements DeviceLifeCycleService {
     private static final DeviceEventFactory DEVICE_EVENT_FACTORY = LOCATOR.getFactory(DeviceEventFactory.class);
 
     private static final DeviceRegistryService DEVICE_REGISTRY_SERVICE = LOCATOR.getService(DeviceRegistryService.class);
-    private static final DeviceFactory DEVICE_FACTORY = LOCATOR.getFactory(DeviceFactory.class);
+
+    private static final String KAPUA_API_URL =
+            System.getProperty("kapua.api.internal.url", "http://kapua-api:8080");
+    private static final String BIRTH_REPLY_BROKER_URL =
+            System.getProperty("kapua.broker.internal.url", "tcp://localhost:1883");
+
+    private static volatile String cachedJwt = null;
+    private static volatile long   jwtExpiresAtMs = 0L;
+    // Lazy to avoid ExceptionInInitializerError if AccountService isn't yet registered
+    private static volatile AccountService accountServiceLazy = null;
 
     @Override
     public void birth(KapuaId connectionId, KapuaBirthMessage birthMessage) throws KapuaException {
@@ -95,33 +112,18 @@ public class DeviceLifeCycleServiceImpl implements DeviceLifeCycleService {
         // Device update
         Device device;
         if (deviceId == null) {
-            DeviceCreator deviceCreator = DEVICE_FACTORY.newCreator(scopeId);
-
-            deviceCreator.setClientId(birthChannel.getClientId());
-            deviceCreator.setDisplayName(birthPayload.getDisplayName());
-            deviceCreator.setSerialNumber(birthPayload.getSerialNumber());
-            deviceCreator.setModelId(birthPayload.getModelId());
-            deviceCreator.setModelName(birthPayload.getModelName());
-            deviceCreator.setImei(birthPayload.getModemImei());
-            deviceCreator.setImsi(birthPayload.getModemImsi());
-            deviceCreator.setIccid(birthPayload.getModemIccid());
-            deviceCreator.setBiosVersion(birthPayload.getBiosVersion());
-            deviceCreator.setFirmwareVersion(birthPayload.getFirmwareVersion());
-            deviceCreator.setOsVersion(birthPayload.getOsVersion());
-            deviceCreator.setJvmVersion(birthPayload.getJvmVersion());
-            deviceCreator.setOsgiFrameworkVersion(birthPayload.getContainerFrameworkVersion());
-            deviceCreator.setApplicationFrameworkVersion(birthPayload.getApplicationFrameworkVersion());
-            deviceCreator.setConnectionInterface(birthPayload.getConnectionInterface());
-            deviceCreator.setConnectionIp(birthPayload.getConnectionIp());
-            deviceCreator.setApplicationIdentifiers(birthPayload.getApplicationIdentifiers());
-            deviceCreator.setAcceptEncoding(birthPayload.getAcceptEncoding());
-
-            deviceCreator.setExtendedProperties(buildDeviceExtendedPropertyFromBirth(birthPayload.getExtendedProperties()));
-
-            // issue #57
-            deviceCreator.setConnectionId(connectionId);
-
-            device = DEVICE_REGISTRY_SERVICE.create(deviceCreator);
+            device = KapuaSecurityUtils.doPrivileged(() ->
+                    DEVICE_REGISTRY_SERVICE.findByClientId(scopeId, birthChannel.getClientId()));
+            if (device == null) {
+                LOG.warn("Ignoring BIRTH for unregistered device scopeId={} clientId={}",
+                        scopeId, birthChannel.getClientId());
+                return;
+            }
+            deviceId = device.getId();
+            birthMessage.setDeviceId(deviceId);
+            LOG.info("Resolved registered device for BIRTH scopeId={} clientId={} deviceId={}",
+                    scopeId, birthChannel.getClientId(), deviceId);
+            device = updateDeviceInfoFromMessage(scopeId, deviceId, birthPayload, connectionId);
         } else {
             device = updateDeviceInfoFromMessage(scopeId, deviceId, birthPayload, connectionId);
         }
@@ -129,6 +131,94 @@ public class DeviceLifeCycleServiceImpl implements DeviceLifeCycleService {
         //
         // Event create
         createLifecycleEvent(device, "BIRTH", birthMessage);
+
+        // Publish BIRTH/Reply so device receives a Kapua JWT and becomes operational
+        try {
+            final KapuaId fScopeId = scopeId;
+            if (accountServiceLazy == null) {
+                accountServiceLazy = LOCATOR.getService(AccountService.class);
+            }
+            final AccountService svc = accountServiceLazy;
+            Account account = KapuaSecurityUtils.doPrivileged(() -> svc.find(fScopeId));
+            if (account != null) {
+                String jwt = getOrRefreshJwt();
+                if (jwt != null) {
+                    String replyTopic = "$EDC/" + account.getName() + "/"
+                            + birthChannel.getClientId() + "/MQTT/BIRTH/Reply";
+                    String scopeIdCompact = scopeId.toCompactId();
+                    String payload = "{\"accessToken\":\"" + jwt
+                            + "\",\"scopeId\":\"" + scopeIdCompact + "\"}";
+                    publishBirthReply(replyTopic, payload.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+        } catch (Throwable e) {
+            LOG.warn("BIRTH/Reply error ({}) for clientId={}: {}", e.getClass().getName(), birthChannel.getClientId(), e.getMessage(), e);
+        }
+    }
+
+    private static synchronized String getOrRefreshJwt() {
+        if (cachedJwt != null && System.currentTimeMillis() < jwtExpiresAtMs - 60_000L) {
+            return cachedJwt;
+        }
+        try {
+            URL url = new URL(KAPUA_API_URL + "/v1/authentication/user");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            conn.getOutputStream().write(
+                    "{\"username\":\"kapua-sys\",\"password\":\"kapua-password\"}".getBytes(StandardCharsets.UTF_8));
+            if (conn.getResponseCode() == 200) {
+                try (InputStream is = conn.getInputStream()) {
+                    java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                    byte[] tmp = new byte[4096];
+                    int n;
+                    while ((n = is.read(tmp)) >= 0) { buf.write(tmp, 0, n); }
+                    String resp = buf.toString("UTF-8");
+                    int ti = resp.indexOf("\"tokenId\"");
+                    if (ti >= 0) {
+                        int s = resp.indexOf('"', ti + 10) + 1;
+                        int e = resp.indexOf('"', s);
+                        cachedJwt = resp.substring(s, e);
+                        jwtExpiresAtMs = System.currentTimeMillis() + 25 * 60 * 1000L; // 25 min
+                        LOG.info("Refreshed Kapua JWT for BIRTH/Reply (expires in 25 min)");
+                        return cachedJwt;
+                    }
+                }
+            }
+            conn.disconnect();
+        } catch (Exception e) {
+            LOG.warn("Failed to fetch Kapua JWT from {}: {}", KAPUA_API_URL, e.getMessage());
+        }
+        return null;
+    }
+
+    private static void publishBirthReply(String topic, byte[] payload) {
+        // Connect via the internalMqtt connector (port 1893) which bypasses the security filter:
+        // isPassThroughConnection() and isInternalConnector() both return true for it.
+        String internalBrokerUrl = "tcp://localhost:1893";
+        String clientId = "birth-reply-" + Thread.currentThread().getId()
+                + "-" + (System.currentTimeMillis() % 100000);
+        try {
+            MqttClient client = new MqttClient(internalBrokerUrl, clientId, new MemoryPersistence());
+            MqttConnectOptions opts = new MqttConnectOptions();
+            opts.setUserName("internalUsername");
+            opts.setPassword("internalPassword".toCharArray());
+            opts.setCleanSession(true);
+            opts.setConnectionTimeout(5);
+            client.connect(opts);
+            MqttMessage msg = new MqttMessage(payload);
+            msg.setQos(1);
+            msg.setRetained(false);
+            client.publish(topic, msg);
+            client.disconnect();
+            client.close();
+            LOG.info("Published BIRTH/Reply ({} bytes) to topic={}", payload.length, topic);
+        } catch (Throwable e) {
+            LOG.warn("Failed to publish BIRTH/Reply ({}) to topic={}: {}", e.getClass().getName(), topic, e.getMessage(), e);
+        }
     }
 
     @Override

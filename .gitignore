@@ -12,3 +12,6 @@ nginx/certs/
 # Environment secrets
 .env
 .env.local
+
+# Runtime Signage uploads
+file-repo-data/

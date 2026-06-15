@@ -14,6 +14,14 @@ function Write-OK   { param($msg) Write-Host "    [OK] $msg" -ForegroundColor Gr
 function Write-Warn { param($msg) Write-Host "    [!!] $msg" -ForegroundColor Yellow }
 function Write-Fail { param($msg) Write-Host "    [XX] $msg" -ForegroundColor Red; exit 1 }
 
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
 # ---- 1. Docker check -------------------------------------------------------
 Write-Step "檢查 Docker Desktop 狀態..."
 try {
@@ -23,6 +31,28 @@ try {
 }
 if ($LASTEXITCODE -ne 0) { Write-Fail "Docker 未啟動，請先開啟 Docker Desktop 後再執行此腳本" }
 Write-OK "Docker 正常運作"
+
+# Legacy SIGNAGE-V1 devices download FileRepo resources from host port 8080.
+Write-Step "檢查 Signage FileRepo 防火牆規則..."
+$fileRepoRuleName = "Kapua Signage FileRepo 8080"
+$fileRepoRule = Get-NetFirewallRule `
+    -DisplayName $fileRepoRuleName `
+    -ErrorAction SilentlyContinue
+
+if ($fileRepoRule) {
+    Write-OK "TCP 8080 入站規則已存在"
+} elseif (Test-IsAdministrator) {
+    New-NetFirewallRule `
+        -DisplayName $fileRepoRuleName `
+        -Direction Inbound `
+        -Action Allow `
+        -Protocol TCP `
+        -LocalPort 8080 `
+        -Profile Any | Out-Null
+    Write-OK "已建立 TCP 8080 入站規則"
+} else {
+    Write-Warn "缺少 TCP 8080 入站規則；請以系統管理員身分執行 start.ps1"
+}
 
 # ---- 2. 同步 patch image（若自訂 JAR 有更新才重建）------------------------
 Write-Step "檢查 kapua-api patch image..."

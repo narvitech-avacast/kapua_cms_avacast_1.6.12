@@ -83,4 +83,5 @@ public class GatewayConfigModel {
     public void setBrokerPassword(String brokerPassword) {
         this.brokerPassword = brokerPassword;
     }
+
 }

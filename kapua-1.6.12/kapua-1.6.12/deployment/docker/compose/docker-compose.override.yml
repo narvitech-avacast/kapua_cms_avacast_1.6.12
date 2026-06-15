@@ -3,11 +3,20 @@ services:
     ports:
       - "3307:3306"
 
+  broker:
+    build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-broker-patch
+    image: kapua/kapua-broker:1.6.12-patched
+
   kapua-api:
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-api-patch
     image: kapua/kapua-api:1.6.12-patched
+    environment:
+      - API_CORS_ORIGINS_ALLOWED=http://localhost:8083,http://172.16.19.37:8083,https://localhost:8445,https://172.16.19.37:8445
+      - SIGNAGE_MEDIA_STORAGE_ROOT=/var/lib/kapua-signage
+      - SIGNAGE_MEDIA_PUBLIC_BASE_URL=https://172.16.19.37
     volumes:
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/jetty/http-forwarded.ini:/var/opt/jetty/start.d/http-forwarded.ini:ro
+      - d:/kapua_0609/kapua_cms_avacast_1.6.12/file-repo-data:/var/lib/kapua-signage
 
   kapua-console:
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-console-patch
@@ -19,11 +28,13 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "8080:8080"
       - "8443:8443"
     volumes:
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/nginx/certs:/etc/nginx/certs:ro
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/nginx/logs:/var/log/nginx
+      - d:/kapua_0609/kapua_cms_avacast_1.6.12/file-repo-data:/var/lib/kapua-signage:ro
     depends_on:
       - kapua-console
       - kapua-api
@@ -41,8 +52,9 @@ services:
       - PROBE_PORTS=8081,8082,8444
       - MQTT_HOST=broker
       - MQTT_PORT=1883
-      - MQTT_USER=kapua-broker
-      - MQTT_PASS=kapua-password
+      - MQTT_USER=${MQTT_DEBUG_USER:-kapua-broker}
+      - MQTT_PASS=${MQTT_DEBUG_PASS:-kapua-password}
+      - MQTT_TOPICS=${MQTT_DEBUG_TOPICS:-#}
     depends_on:
       - broker
     restart: unless-stopped

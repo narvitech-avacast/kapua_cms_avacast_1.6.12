@@ -29,6 +29,7 @@ import com.google.gwt.json.client.JSONParser;
 import com.google.gwt.json.client.JSONValue;
 import com.google.gwt.user.client.Element;
 import com.google.gwt.user.client.Timer;
+import com.google.gwt.user.client.Window;
 import org.eclipse.kapua.app.console.module.api.shared.model.session.GwtSession;
 
 public class DeviceTokenDialog extends Dialog {
@@ -105,7 +106,7 @@ public class DeviceTokenDialog extends Dialog {
         generateBtn.setText("產生中...");
 
         String scopeIdEnc = URL.encodePathSegment(currentSession.getSelectedAccountId());
-        String apiUrl = "/v1/" + scopeIdEnc + "/devices/registrationToken";
+        String apiUrl = getApiBaseUrl() + "/v1/" + scopeIdEnc + "/devices/registrationToken";
 
         RequestBuilder rb = new RequestBuilder(RequestBuilder.POST, apiUrl);
         rb.setHeader("Authorization", "Bearer " + currentSession.getTokenId());
@@ -149,6 +150,19 @@ public class DeviceTokenDialog extends Dialog {
             generateBtn.setText("產生 Token");
             addError("請求失敗：" + e.getMessage());
         }
+    }
+
+    private String getApiBaseUrl() {
+        String consolePort = Window.Location.getPort();
+        String hostName = Window.Location.getHostName();
+
+        if ("8083".equals(consolePort)) {
+            return "http://" + hostName;
+        }
+        if ("8445".equals(consolePort)) {
+            return "https://" + hostName + ":8443";
+        }
+        return "";
     }
 
     // ── View: success ────────────────────────────────────────────

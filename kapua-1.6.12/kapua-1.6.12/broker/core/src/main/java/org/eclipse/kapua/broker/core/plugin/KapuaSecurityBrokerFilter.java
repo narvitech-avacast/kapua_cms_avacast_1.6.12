@@ -465,6 +465,10 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
                     accessToken.getScopeId(), info.getClientId()
                 )
             );
+            if (info.getClientId().startsWith("tx-") && device == null) {
+                logger.warn("Rejecting deleted or unregistered device {}", info.getClientId());
+                throw new SecurityException("Device is not registered");
+            }
             if (device != null && DeviceStatus.DISABLED.equals(device.getStatus())) {
                 logger.warn("Device {} is disabled", info.getClientId());
                 throw new SecurityException("Device is disabled");

@@ -20,6 +20,7 @@ import org.eclipse.kapua.app.api.resources.v1.resources.model.GatewayConfigXmlGe
 import org.eclipse.kapua.app.api.resources.v1.resources.model.Words;
 import org.eclipse.kapua.broker.BrokerDomains;
 import org.eclipse.kapua.common.util.GatewayConfig.GatewayConfigModel;
+import org.eclipse.kapua.service.device.management.DeviceManagementDomain;
 import org.eclipse.kapua.commons.responeCode.AccountResponseCode;
 import org.eclipse.kapua.commons.responeCode.DeviceResponseCode;
 import org.eclipse.kapua.commons.security.KapuaSecurityUtils;
@@ -40,12 +41,20 @@ import org.eclipse.kapua.service.authorization.access.AccessInfo;
 import org.eclipse.kapua.service.authorization.access.AccessInfoCreator;
 import org.eclipse.kapua.service.authorization.access.AccessInfoFactory;
 import org.eclipse.kapua.service.authorization.access.AccessInfoService;
+import org.eclipse.kapua.service.authorization.access.AccessPermission;
+import org.eclipse.kapua.service.authorization.access.AccessPermissionCreator;
+import org.eclipse.kapua.service.authorization.access.AccessPermissionFactory;
+import org.eclipse.kapua.service.authorization.access.AccessPermissionListResult;
+import org.eclipse.kapua.service.authorization.access.AccessPermissionService;
 import org.eclipse.kapua.service.authorization.permission.Permission;
 import org.eclipse.kapua.service.authorization.permission.PermissionFactory;
 import org.eclipse.kapua.service.device.management.gatewayconfig.DeviceTokenGenGatewayconfig;
 import org.eclipse.kapua.service.device.registry.Device;
+import org.eclipse.kapua.service.device.registry.DeviceAttributes;
 import org.eclipse.kapua.service.device.registry.DeviceCreator;
 import org.eclipse.kapua.service.device.registry.DeviceFactory;
+import org.eclipse.kapua.service.device.registry.DeviceListResult;
+import org.eclipse.kapua.service.device.registry.DeviceQuery;
 import org.eclipse.kapua.service.device.registry.DeviceRegistryService;
 import org.eclipse.kapua.service.user.User;
 import org.eclipse.kapua.service.user.UserCreator;
@@ -54,6 +63,9 @@ import org.eclipse.kapua.service.user.UserListResult;
 import org.eclipse.kapua.service.user.UserQuery;
 import org.eclipse.kapua.service.user.UserService;
 import org.eclipse.kapua.service.user.UserType;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
@@ -68,6 +80,8 @@ import java.util.Set;
 
 @Path("devicesNoAuth")
 public class DeviceNoAuth extends AbstractKapuaResource {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(DeviceNoAuth.class);
 
     private final KapuaLocator locator = KapuaLocator.getInstance();
 
@@ -84,6 +98,8 @@ public class DeviceNoAuth extends AbstractKapuaResource {
 
     private final AccessInfoService accessInfoService = locator.getService(AccessInfoService.class);
     private final AccessInfoFactory accessInfoFactory = locator.getFactory(AccessInfoFactory.class);
+    private final AccessPermissionService accessPermissionService = locator.getService(AccessPermissionService.class);
+    private final AccessPermissionFactory accessPermissionFactory = locator.getFactory(AccessPermissionFactory.class);
     private final PermissionFactory permissionFactory = locator.getFactory(PermissionFactory.class);
 
     @Context
@@ -106,19 +122,34 @@ public class DeviceNoAuth extends AbstractKapuaResource {
             }
             final ScopeId scopeId = new ScopeId(tokenWithPlatform.getScopeId());
 
+            String clientId = resolveClientId(tokenWithPlatform);
+            if (isBlank(clientId)) {
+                LOGGER.warn("GatewayConfig denied: clientId and accessToken are missing scopeId={}", scopeId);
+                Words err = new Words();
+                err.setValue("400:MISSING_CLIENT_ID");
+                return err;
+            }
+            tokenWithPlatform.setClientId(clientId);
+
             Device device;
-            if (!isBlank(tokenWithPlatform.getClientId())) {
-                boolean tokenValid = DeviceRegistrationTokenStore.getInstance().consume(
-                        scopeId.toCompactId(), tokenWithPlatform.getAccessToken());
-                if (!tokenValid) {
+            boolean tokenValid = DeviceRegistrationTokenStore.getInstance().consume(
+                    scopeId.toCompactId(), tokenWithPlatform.getAccessToken());
+            if (!tokenValid) {
+                // Token already consumed — device was likely created on the first call but
+                // the client retried due to a transient failure (e.g. MQTT subscribe err:-3).
+                // Allow re-fetching GatewayConfig for an existing device without creating a new one.
+                device = findPersistedDevice(scopeId, tokenWithPlatform.getClientId());
+                if (device == null) {
+                    LOGGER.warn("GatewayConfig denied: token consumed and device not found scopeId={} clientId={}",
+                            scopeId, tokenWithPlatform.getClientId());
                     Words err = new Words();
                     err.setValue("401:INVALID_OR_EXPIRED_DEVICE_TOKEN");
                     return err;
                 }
-                device = createOrFindDevice(scopeId, tokenWithPlatform);
+                LOGGER.info("GatewayConfig re-fetch for existing device scopeId={} clientId={}",
+                        scopeId, tokenWithPlatform.getClientId());
             } else {
-                device = KapuaSecurityUtils.doPrivileged(
-                        () -> deviceService.findByClientId(scopeId, tokenWithPlatform.getAccessToken()));
+                device = createOrFindDevice(scopeId, tokenWithPlatform);
             }
 
             if (device == null) {
@@ -135,7 +166,7 @@ public class DeviceNoAuth extends AbstractKapuaResource {
                 return err;
             }
 
-            if ("Android".equals(tokenWithPlatform.getPlatform())) {
+            if ("android".equalsIgnoreCase(tokenWithPlatform.getPlatform())) {
                 GatewayConfigXmlGen gcxg = new GatewayConfigXmlGen();
                 gcxg.setGatewayConfig(gcm);
                 return gcxg.build();
@@ -155,8 +186,7 @@ public class DeviceNoAuth extends AbstractKapuaResource {
             ScopeId scopeId,
             DeviceTokenGenGatewayconfig tokenWithPlatform) throws KapuaException {
 
-        Device existing = KapuaSecurityUtils.doPrivileged(
-                () -> deviceService.findByClientId(scopeId, tokenWithPlatform.getClientId()));
+        Device existing = findPersistedDevice(scopeId, tokenWithPlatform.getClientId());
         if (existing != null) {
             return existing;
         }
@@ -168,8 +198,18 @@ public class DeviceNoAuth extends AbstractKapuaResource {
                 tokenWithPlatform.getDisplayName() :
                 tokenWithPlatform.getClientId());
 
-        return KapuaSecurityUtils.doPrivileged(
+        KapuaSecurityUtils.doPrivileged(
                 () -> deviceService.create(deviceCreator));
+        return findPersistedDevice(scopeId, tokenWithPlatform.getClientId());
+    }
+
+    private Device findPersistedDevice(ScopeId scopeId, String clientId) throws KapuaException {
+        DeviceQuery query = KapuaSecurityUtils.doPrivileged(
+                () -> deviceFactory.newQuery(scopeId));
+        query.setPredicate(query.attributePredicate(DeviceAttributes.CLIENT_ID, clientId));
+        DeviceListResult result = KapuaSecurityUtils.doPrivileged(
+                () -> deviceService.query(query));
+        return result != null && !result.isEmpty() ? result.getFirstItem() : null;
     }
 
     @POST
@@ -224,6 +264,35 @@ public class DeviceNoAuth extends AbstractKapuaResource {
         }
     }
 
+    @POST
+    @Path("{scopeId}/patchBrokerAccess")
+    @Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML})
+    public Words patchBrokerAccess(@PathParam("scopeId") ScopeId scopeId) {
+        try {
+            Account account = KapuaSecurityUtils.doPrivileged(
+                    () -> accountService.find(scopeId));
+            if (account == null) {
+                Words err = new Words();
+                err.setValue("404:ACCOUNT_NOT_FOUND");
+                return err;
+            }
+            User brokerUser = ensureBrokerUser(account);
+            AccessInfo accessInfo = KapuaSecurityUtils.doPrivileged(
+                    () -> accessInfoService.findByUserId(brokerUser.getScopeId(), brokerUser.getId()));
+            if (accessInfo != null) {
+                ensureBrokerReadPermission(accessInfo, brokerUser);
+            }
+            Words ok = new Words();
+            ok.setValue("200:BROKER_ACCESS_PATCHED:" + brokerUser.getName());
+            return ok;
+        } catch (Exception e) {
+            e.printStackTrace();
+            Words err = new Words();
+            err.setValue("500:" + e.getMessage());
+            return err;
+        }
+    }
+
     private User findBrokerUser(org.eclipse.kapua.model.id.KapuaId scopeId, String brokerUserName)
             throws KapuaException {
         UserQuery query = KapuaSecurityUtils.doPrivileged(
@@ -265,24 +334,57 @@ public class DeviceNoAuth extends AbstractKapuaResource {
     private void ensureBrokerAccess(User brokerUser) throws KapuaException {
         AccessInfo accessInfo = KapuaSecurityUtils.doPrivileged(
                 () -> accessInfoService.findByUserId(brokerUser.getScopeId(), brokerUser.getId()));
-        if (accessInfo != null) {
-            return;
+
+        if (accessInfo == null) {
+            AccessInfoCreator accessInfoCreator = KapuaSecurityUtils.doPrivileged(
+                    () -> accessInfoFactory.newCreator(brokerUser.getScopeId()));
+            accessInfoCreator.setUserId(brokerUser.getId());
+
+            Set<Permission> permissions = new HashSet<>();
+            permissions.add(KapuaSecurityUtils.doPrivileged(
+                    () -> permissionFactory.newPermission(
+                            BrokerDomains.BROKER_DOMAIN,
+                            Actions.connect,
+                            brokerUser.getScopeId())));
+            permissions.add(KapuaSecurityUtils.doPrivileged(
+                    () -> permissionFactory.newPermission(
+                            new DeviceManagementDomain(),
+                            Actions.write,
+                            brokerUser.getScopeId())));
+            accessInfoCreator.setPermissions(permissions);
+
+            KapuaSecurityUtils.doPrivileged(
+                    () -> accessInfoService.create(accessInfoCreator));
+        } else {
+            ensureBrokerReadPermission(accessInfo, brokerUser);
         }
+    }
 
-        AccessInfoCreator accessInfoCreator = KapuaSecurityUtils.doPrivileged(
-                () -> accessInfoFactory.newCreator(brokerUser.getScopeId()));
-        accessInfoCreator.setUserId(brokerUser.getId());
-
-        Set<Permission> permissions = new HashSet<>();
-        permissions.add(KapuaSecurityUtils.doPrivileged(
+    private void ensureBrokerReadPermission(AccessInfo accessInfo, User brokerUser) throws KapuaException {
+        AccessPermissionListResult existing = KapuaSecurityUtils.doPrivileged(
+                () -> accessPermissionService.findByAccessInfoId(brokerUser.getScopeId(), accessInfo.getId()));
+        if (existing != null) {
+            for (int i = 0; i < existing.getSize(); i++) {
+                AccessPermission ap = existing.getItem(i);
+                Permission p = ap.getPermission();
+                if (p != null
+                        && new DeviceManagementDomain().getName().equals(p.getDomain())
+                        && Actions.write.equals(p.getAction())) {
+                    return;
+                }
+            }
+        }
+        // Grant device_management:write so isDeviceManage()=true → broker ACL adds READ on $EDC account topics
+        Permission devMgmtWritePerm = KapuaSecurityUtils.doPrivileged(
                 () -> permissionFactory.newPermission(
-                        BrokerDomains.BROKER_DOMAIN,
-                        Actions.connect,
-                        brokerUser.getScopeId())));
-        accessInfoCreator.setPermissions(permissions);
-
-        KapuaSecurityUtils.doPrivileged(
-                () -> accessInfoService.create(accessInfoCreator));
+                        new DeviceManagementDomain(),
+                        Actions.write,
+                        brokerUser.getScopeId()));
+        AccessPermissionCreator apc = KapuaSecurityUtils.doPrivileged(
+                () -> accessPermissionFactory.newCreator(brokerUser.getScopeId()));
+        apc.setAccessInfoId(accessInfo.getId());
+        apc.setPermission(devMgmtWritePerm);
+        KapuaSecurityUtils.doPrivileged(() -> accessPermissionService.create(apc));
     }
 
     private void ensureBrokerCredential(Account account, User brokerUser) throws KapuaException {
@@ -313,11 +415,24 @@ public class DeviceNoAuth extends AbstractKapuaResource {
             throws Exception {
 
         GatewayConfigModel gcm = new GatewayConfigModel();
-        gcm.setDeviceName(device.getClientId());
+
+        String clientId = device.getClientId();
+        if (isBlank(clientId)) {
+            LOGGER.error("GatewayConfig build failed: device clientId is blank for device {}", device.getId());
+            return null;
+        }
+        gcm.setDeviceName(clientId);
 
         Account account = KapuaSecurityUtils.doPrivileged(
                 () -> accountService.find(device.getScopeId()));
         if (account == null) {
+            LOGGER.error("GatewayConfig build failed: account not found for scopeId {}", device.getScopeId());
+            return null;
+        }
+
+        String accountName = account.getName();
+        if (isBlank(accountName)) {
+            LOGGER.error("GatewayConfig build failed: accountName is blank for scopeId {}", device.getScopeId());
             return null;
         }
 
@@ -325,9 +440,15 @@ public class DeviceNoAuth extends AbstractKapuaResource {
         gcm.setBrokerUser(brokerUser.getName());
         gcm.setBrokerHost(resolveBrokerHost(systemSetting));
         gcm.setBrokerPort(systemSetting.getString(SystemSettingKey.BROKER_PORT, "1883"));
-        gcm.setBrokerProtocol(systemSetting.getString(SystemSettingKey.BROKER_SCHEME));
-        gcm.setAccountName(account.getName());
+        gcm.setBrokerProtocol(systemSetting.getString(SystemSettingKey.BROKER_SCHEME, "tcp"));
+        gcm.setAccountName(accountName);
         gcm.setBrokerPassword(resolveBrokerPassword(systemSetting, account, brokerUser));
+
+        // $EDC/{AccountName}/{ClientId}/#  — control topic the device must subscribe to
+        String subscribeTopic = "$EDC/" + accountName + "/" + clientId + "/#";
+
+        LOGGER.info("GatewayConfig built: brokerUser={} accountName={} clientId={} subscribeTopic={}",
+                brokerUser.getName(), accountName, clientId, subscribeTopic);
 
         return gcm;
     }
@@ -401,5 +522,22 @@ public class DeviceNoAuth extends AbstractKapuaResource {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private String resolveClientId(DeviceTokenGenGatewayconfig tokenWithPlatform) {
+        if (!isBlank(tokenWithPlatform.getClientId())) {
+            return tokenWithPlatform.getClientId().trim();
+        }
+
+        String token = tokenWithPlatform.getAccessToken();
+        if (isBlank(token)) {
+            return null;
+        }
+
+        String tokenId = token.replace("-", "").replace("_", "");
+        int suffixStart = Math.max(0, tokenId.length() - 12);
+        String clientId = "tx-" + tokenId.substring(suffixStart);
+        LOGGER.info("Using legacy token-derived clientId={} for device registration", clientId);
+        return clientId;
     }
 }
