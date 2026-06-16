@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signage 管理</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Roboto,'Segoe UI',sans-serif;font-size:13px;background:#f5f5f5;color:#333;height:100vh;display:flex;flex-direction:column}
+
+/* ── Login ── */
+#view-login{flex:1;display:flex;align-items:center;justify-content:center}
+.login-card{background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.15);padding:36px 40px;width:320px}
+.login-card h1{font-size:18px;font-weight:600;color:#1a73e8;margin-bottom:24px;text-align:center}
+.login-card label{display:block;font-size:12px;font-weight:500;color:#555;margin-bottom:4px}
+.login-card input{width:100%;padding:9px 11px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:14px}
+.login-card input:focus{border-color:#1a73e8;outline:none;box-shadow:0 0 0 2px rgba(26,115,232,.15)}
+.login-card .btn-login{width:100%;padding:10px;background:#1a73e8;color:#fff;border:none;border-radius:4px;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
+.login-card .btn-login:hover{background:#1557b0}
+.login-card .btn-login:disabled{opacity:.55;cursor:not-allowed}
+#login-error{color:#c5221f;font-size:12px;margin-top:10px;text-align:center;min-height:18px}
+
+/* ── Header ── */
+#app-header{background:#1a73e8;color:#fff;padding:0 18px;height:48px;display:none;align-items:center;gap:12px;flex-shrink:0}
+#app-header h1{font-size:15px;font-weight:600;flex:1}
+#header-user{font-size:12px;opacity:.85}
+.btn-logout{padding:5px 12px;border:1px solid rgba(255,255,255,.6);border-radius:4px;background:transparent;color:#fff;font-size:12px;cursor:pointer}
+.btn-logout:hover{background:rgba(255,255,255,.15)}
+
+/* ── Main layout ── */
+#view-main{flex:1;display:none;overflow:hidden;flex-direction:row}
+#device-sidebar{width:260px;background:#fff;border-right:1px solid #e0e0e0;display:flex;flex-direction:column;flex-shrink:0}
+#device-sidebar h2{font-size:13px;font-weight:600;color:#555;padding:12px 14px 8px;border-bottom:1px solid #eee}
+#device-search{padding:8px 10px;border:none;border-bottom:1px solid #eee;font-size:12px;width:100%;outline:none}
+#device-list{flex:1;overflow-y:auto}
+.device-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px}
+.device-item:hover{background:#f1f8ff}
+.device-item.active{background:#e8f0fe;color:#1a73e8;font-weight:600}
+.device-item .device-name{font-weight:500;margin-bottom:2px}
+.device-item .device-client{color:#888;font-size:11px}
+#device-loading{padding:16px;text-align:center;color:#888;font-size:12px}
+#device-empty{padding:16px;text-align:center;color:#aaa;font-size:12px}
+
+/* ── Signage panel ── */
+#signage-area{flex:1;overflow-y:auto;padding:16px}
+#signage-placeholder{display:flex;align-items:center;justify-content:center;height:100%;color:#aaa;font-size:13px}
+
+/* ── Signage panel internals ── */
+#signage-area h2{font-size:17px;font-weight:600;color:#1a73e8;margin-bottom:12px}
+.toolbar,.form-actions{display:flex;gap:8px;margin:12px 0;align-items:center}
+.btn{padding:7px 14px;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:500}
+.btn:disabled{cursor:not-allowed;opacity:.55}
+.btn-primary{background:#1a73e8;color:#fff}.btn-primary:hover:not(:disabled){background:#1557b0}
+.btn-danger{background:#ea4335;color:#fff}.btn-danger:hover{background:#c5221f}
+.btn-secondary{background:#fff;color:#333;border:1px solid #ccc}.btn-secondary:hover{background:#f1f3f4}
+.btn-sm{padding:4px 10px;font-size:11px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+th{background:#f8f9fa;padding:10px 12px;text-align:left;font-weight:600;color:#555;border-bottom:2px solid #e0e0e0;font-size:12px}
+td{padding:10px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+tr:hover td{background:#fafafa}
+.msg{padding:10px 14px;border-radius:4px;margin-bottom:10px;font-size:12px}
+.msg-info{background:#e8f0fe;color:#1a73e8}
+.msg-success{background:#e6f4ea;color:#137333}
+.msg-error{background:#fce8e6;color:#c5221f}
+.device-status{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.status-card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:11px 12px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.status-label{font-size:11px;color:#777;margin-bottom:4px}
+.status-value{font-size:13px;font-weight:600}
+.status-ok{color:#137333}.status-bad{color:#c5221f}.status-warn{color:#b06000}
+.form-card{background:#fff;border-radius:6px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.form-row{margin-bottom:16px}
+label{display:block;font-size:12px;font-weight:500;color:#555;margin-bottom:5px}
+input[type=text],input[type=number],input[type=date],input[type=time],select{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;background:#fff}
+input:focus,select:focus{border-color:#1a73e8;outline:none;box-shadow:0 0 0 2px rgba(26,115,232,.15)}
+.appearance-panel{margin-bottom:14px}
+.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.panel-heading h2{margin-bottom:0}
+.config-grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:14px}
+.inline-status{font-size:12px;color:#777}
+.inline-status.loading{color:#1a73e8}
+.inline-status.success{color:#137333}
+.inline-status.error{color:#c5221f}
+.upload-box{border:2px dashed #b7c8e6;border-radius:8px;padding:22px;text-align:center;background:#f8fbff}
+.upload-box input{display:none}
+.upload-help{color:#777;font-size:12px;margin-top:8px}
+.media-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-top:14px}
+.media-card{border:1px solid #ddd;border-radius:7px;overflow:hidden;background:#fff}
+.media-card img{width:100%;height:130px;object-fit:contain;background:#eee;display:block}
+.media-body{padding:10px}
+.media-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;margin-bottom:8px}
+.duration-row{display:flex;align-items:center;gap:7px}
+.duration-row input{width:72px}
+.duration-row .btn{margin-left:auto}
+/* schedule row checkbox (kept for schedule enable) */
+.schedule-toggle{display:inline-flex;align-items:center;gap:8px;margin-bottom:0;cursor:pointer;color:#333}
+.schedule-toggle input{width:auto}
+/* iOS-style toggle switch */
+.tog{display:inline-flex !important;align-items:center;gap:12px;cursor:pointer;user-select:none;margin-bottom:0}
+.tog input{display:none !important}
+.tog-track{position:relative;width:48px;height:26px;background:#ccc;border-radius:13px;transition:background .22s;flex-shrink:0}
+.tog-track::after{content:'';position:absolute;width:22px;height:22px;background:#fff;border-radius:50%;top:2px;left:2px;transition:transform .22s;box-shadow:0 1px 4px rgba(0,0,0,.28)}
+.tog-track.is-on{background:#1a73e8}
+.tog-track.is-on::after{transform:translateX(22px)}
+.tog-label{font-size:14px;font-weight:500;color:#333;min-width:28px}
+.schedule-panel{border:1px solid #e0e0e0;border-radius:6px;padding:14px;margin:4px 0 16px;background:#fbfbfb}
+.weekday-group{display:flex;flex-wrap:wrap;gap:8px}
+.weekday-option{display:inline-flex;align-items:center;gap:5px;border:1px solid #d9dce1;border-radius:4px;padding:7px 9px;background:#fff;cursor:pointer}
+.weekday-option input{width:auto}
+.schedule-summary{font-weight:600;color:#1a73e8}
+.schedule-detail{font-size:11px;color:#666;margin-top:3px;line-height:1.4}
+.thumbs{display:flex;gap:4px}
+.thumbs img{width:42px;height:32px;object-fit:cover;border-radius:3px;background:#eee}
+.empty{padding:32px;text-align:center;color:#999;background:#fff;border-radius:6px}
+.sp-status{display:none;color:#1a73e8;font-size:12px}
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="view-login">
+  <div class="login-card">
+    <h1>Signage 管理</h1>
+    <label for="login-user">帳號</label>
+    <input type="text" id="login-user" value="admin" autocomplete="username">
+    <label for="login-pass">密碼</label>
+    <input type="password" id="login-pass" value="admin" autocomplete="current-password">
+    <button class="btn-login" id="login-btn" onclick="doLogin()">登入</button>
+    <div id="login-error"></div>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="app-header">
+  <h1>Signage 管理</h1>
+  <span id="header-user"></span>
+  <button class="btn-logout" onclick="doLogout()">登出</button>
+</div>
+
+<!-- Main -->
+<div id="view-main">
+  <!-- Device sidebar -->
+  <div id="device-sidebar">
+    <h2>裝置列表</h2>
+    <input type="text" id="device-search" placeholder="搜尋裝置名稱…" oninput="filterDevices()">
+    <div id="device-list">
+      <div id="device-loading">載入中…</div>
+    </div>
+  </div>
+
+  <!-- Signage content area -->
+  <div id="signage-area">
+    <div id="signage-placeholder">← 請選擇裝置</div>
+
+    <!-- Signage panel content (hidden until device selected) -->
+    <div id="signage-content" style="display:none">
+      <div id="msg-area"></div>
+      <div class="device-status">
+        <div class="status-card">
+          <div class="status-label">裝置註冊</div>
+          <div id="device-registry-status" class="status-value status-warn">檢查中...</div>
+        </div>
+        <div class="status-card">
+          <div class="status-label">MQTT 連線</div>
+          <div id="device-connection-status" class="status-value status-warn">檢查中...</div>
+        </div>
+        <div class="status-card">
+          <div class="status-label">Signage 支援</div>
+          <div id="device-signage-status" class="status-value status-warn">檢查中...</div>
+        </div>
+      </div>
+
+      <div id="appearance-panel" class="form-card appearance-panel">
+        <div class="panel-heading">
+          <h2>Appearance</h2>
+          <span id="appearance-config-status" class="inline-status">尚未讀取</span>
+        </div>
+        <div class="form-row">
+          <label class="tog">
+            <input type="checkbox" id="appearance-overlay" onchange="setToggle(this)">
+            <span class="tog-track" id="overlay-track"></span>
+            <span class="tog-label" id="overlay-label">Off</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button id="appearance-load-btn" class="btn btn-secondary" onclick="loadAppearanceSettings()">讀取設定</button>
+          <button id="appearance-save-btn" class="btn btn-primary" onclick="saveAppearanceSettings()">套用 Appearance</button>
+        </div>
+      </div>
+
+      <div id="view-list">
+        <h2>Signage 播放清單</h2>
+        <div class="toolbar">
+          <button class="btn btn-primary" onclick="showCreate()">新增播放清單</button>
+          <button class="btn btn-secondary" onclick="loadList()">重新整理</button>
+          <span id="spinner" class="sp-status">載入中...</span>
+        </div>
+        <div id="list-container"><div class="empty">載入中...</div></div>
+      </div>
+
+      <div id="view-form" style="display:none">
+        <h2 id="form-title">新增播放清單</h2>
+        <div class="form-card">
+          <div class="form-row">
+            <label for="f-listName">播放清單名稱 *</label>
+            <input type="text" id="f-listName" placeholder="例：大廳廣告">
+          </div>
+          <div class="form-row">
+            <label>播放圖片 *</label>
+            <div class="upload-box">
+              <input type="file" id="f-images" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" multiple onchange="addImages(this.files)">
+              <button class="btn btn-secondary" type="button" onclick="document.getElementById('f-images').click()">選擇圖片</button>
+              <div class="upload-help">支援 JPG、PNG、GIF、WebP、BMP，單張上限 20 MB，可一次選擇多張。</div>
+            </div>
+            <div id="media-list" class="media-list"></div>
+          </div>
+          <div class="form-row">
+            <label class="schedule-toggle">
+              <input type="checkbox" id="f-schedule-enabled" onchange="toggleSchedulePanel(true)">
+              啟用排定行程
+            </label>
+          </div>
+          <div id="schedule-panel" class="schedule-panel" style="display:none">
+            <div class="config-grid">
+              <div class="form-row">
+                <label for="f-schedule-start-date">開始日期</label>
+                <input type="date" id="f-schedule-start-date">
+              </div>
+              <div class="form-row">
+                <label for="f-schedule-end-date">結束日期</label>
+                <input type="date" id="f-schedule-end-date">
+              </div>
+              <div class="form-row">
+                <label for="f-schedule-start-time">開始時間</label>
+                <input type="time" id="f-schedule-start-time" step="1">
+              </div>
+              <div class="form-row">
+                <label for="f-schedule-end-time">結束時間</label>
+                <input type="time" id="f-schedule-end-time" step="1">
+              </div>
+            </div>
+            <div class="form-row">
+              <label>播放星期</label>
+              <div class="weekday-group">
+                <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="1">日</label>
+                <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="2">一</label>
+                <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="3">二</label>
+                <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="4">三</label>
+                <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="5">四</label>
+                <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="6">五</label>
+                <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="7">六</label>
+              </div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button id="save-btn" class="btn btn-primary" onclick="savePlaylist()">儲存並傳送到裝置</button>
+            <button class="btn btn-secondary" onclick="showList()">取消</button>
+            <span id="save-status" class="sp-status">圖片上傳中...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Auth state ───────────────────────────────────────────────────────────────
+let TOKEN = '';
+let SCOPE_ID = '';
+let DEVICE_ID = '';
+let deviceClientId = '';
+let deviceConnected = false;
+
+const APPEARANCE_CONFIG_ID = 'com.PeerInternet.Appearance.Config';
+
+function jsonHeaders() {
+  return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', 'Accept': 'application/json' };
+}
+
+// ── Login ────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  const btn  = document.getElementById('login-btn');
+  const err  = document.getElementById('login-error');
+  if (!user || !pass) { err.textContent = '請填寫帳號和密碼'; return; }
+  btn.disabled = true;
+  btn.textContent = '登入中…';
+  err.textContent = '';
+  try {
+    const resp = await fetch('/v1/authentication/user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      err.textContent = data.message || data.error || ('登入失敗 HTTP ' + resp.status);
+      return;
+    }
+    TOKEN = data.tokenId || data.token || '';
+    if (!TOKEN) { err.textContent = '登入回應中找不到 token'; return; }
+    // Get user's scope
+    const meResp = await fetch('/v1/user/me', { headers: jsonHeaders() });
+    const me = await meResp.json().catch(() => ({}));
+    SCOPE_ID = me.scopeId || me.accountId || '';
+    if (!SCOPE_ID) { err.textContent = '無法取得帳號資訊'; return; }
+    showMain(user);
+  } catch (e) {
+    err.textContent = '網路錯誤：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登入';
+  }
+}
+
+function doLogout() {
+  TOKEN = '';
+  SCOPE_ID = '';
+  DEVICE_ID = '';
+  document.getElementById('view-login').style.display = 'flex';
+  document.getElementById('app-header').style.display = 'none';
+  document.getElementById('view-main').style.display = 'none';
+  document.getElementById('login-pass').value = '';
+}
+
+function showMain(username) {
+  document.getElementById('view-login').style.display = 'none';
+  document.getElementById('app-header').style.display = 'flex';
+  document.getElementById('view-main').style.display = 'flex';
+  document.getElementById('header-user').textContent = username;
+  loadDeviceList();
+}
+
+// ── Device list ──────────────────────────────────────────────────────────────
+let allDevices = [];
+
+async function loadDeviceList() {
+  document.getElementById('device-loading').style.display = 'block';
+  document.getElementById('device-empty') && (document.getElementById('device-empty').remove());
+  try {
+    const resp = await fetch(
+      '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices?limit=200',
+      { headers: jsonHeaders() }
+    );
+    const data = await resp.json().catch(() => ({}));
+    allDevices = (data.device || data.items || data.devices || []);
+    renderDeviceList(allDevices);
+  } catch (e) {
+    document.getElementById('device-loading').textContent = '載入失敗：' + e.message;
+  }
+}
+
+function filterDevices() {
+  const q = document.getElementById('device-search').value.trim().toLowerCase();
+  renderDeviceList(q
+    ? allDevices.filter(d => (d.displayName || d.clientId || '').toLowerCase().includes(q))
+    : allDevices
+  );
+}
+
+function renderDeviceList(devices) {
+  const list = document.getElementById('device-list');
+  list.innerHTML = '';
+  if (!devices.length) {
+    list.innerHTML = '<div id="device-empty" style="padding:16px;text-align:center;color:#aaa;font-size:12px">無裝置</div>';
+    return;
+  }
+  devices.forEach(d => {
+    const el = document.createElement('div');
+    el.className = 'device-item' + (d.id === DEVICE_ID ? ' active' : '');
+    el.innerHTML =
+      '<div class="device-name">' + escHtml(d.displayName || d.clientId || d.id) + '</div>' +
+      '<div class="device-client">' + escHtml(d.clientId || '') + '</div>';
+    el.onclick = () => selectDevice(d);
+    list.appendChild(el);
+  });
+  document.getElementById('device-loading').style.display = 'none';
+}
+
+function selectDevice(device) {
+  DEVICE_ID = device.id;
+  document.querySelectorAll('.device-item').forEach(el => el.classList.remove('active'));
+  event && event.currentTarget && event.currentTarget.classList.add('active');
+  // Re-render to mark active
+  filterDevices();
+  document.getElementById('signage-placeholder').style.display = 'none';
+  document.getElementById('signage-content').style.display = '';
+  // Reset signage panel state
+  editingId = null;
+  mediaItems = [];
+  showList();
+  loadDeviceStatus();
+  loadAppearanceSettings();
+  loadList();
+}
+
+// ── Everything below is the existing signage panel logic ─────────────────────
+
+let editingId = null;
+let mediaItems = [];
+
+const WEEKDAY_LABELS = { 1:'日', 2:'一', 3:'二', 4:'三', 5:'四', 6:'五', 7:'六' };
+
+function BASE() {
+  return '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices/' + encodeURIComponent(DEVICE_ID) + '/digitalsignage';
+}
+function APPEARANCE_BASE() {
+  return '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices/' + encodeURIComponent(DEVICE_ID) +
+    '/configurations/' + encodeURIComponent(APPEARANCE_CONFIG_ID);
+}
+
+function showList() {
+  document.getElementById('view-list').style.display = '';
+  document.getElementById('view-form').style.display = 'none';
+  editingId = null;
+}
+
+function showCreate() {
+  editingId = null;
+  mediaItems = [];
+  document.getElementById('form-title').textContent = '新增播放清單';
+  document.getElementById('f-listName').value = '';
+  document.getElementById('f-images').value = '';
+  setScheduleForm(defaultSchedule());
+  document.getElementById('view-list').style.display = 'none';
+  document.getElementById('view-form').style.display = '';
+  renderMedia();
+  clearMsg();
+}
+
+function showEdit(pl) {
+  editingId = pl.id;
+  const durations = {};
+  (pl.playContent || []).forEach(content => {
+    const parameter = (content.parameters || []).find(item => item.id === 'resourceId' || item.id === 'image');
+    if (parameter) {
+      const key = String(parameter.value || '').replace(/^\$/, '');
+      durations[key] = durationToSeconds(content.duration);
+    }
+  });
+  mediaItems = (pl.resources || []).map(resource => ({
+    id: resource.id,
+    name: resource.name || resource.fileName || '圖片',
+    fileName: resource.fileName || '',
+    path: resource.path || resource.url || '',
+    url: resource.url || resource.path || '',
+    preview: absoluteMediaUrl(resource.url || resource.path || ''),
+    contentType: resource.contentType || '',
+    size: resource.size || 0,
+    sha256: resource.sha256 || '',
+    duration: durations[resource.id] || durations[resource.name] || 10,
+    file: null
+  }));
+  document.getElementById('form-title').textContent = '編輯播放清單';
+  document.getElementById('f-listName').value = pl.listName || '';
+  document.getElementById('f-images').value = '';
+  setScheduleForm(pl.schedule || defaultSchedule());
+  document.getElementById('view-list').style.display = 'none';
+  document.getElementById('view-form').style.display = '';
+  renderMedia();
+  clearMsg();
+}
+
+function addImages(files) {
+  for (const file of Array.from(files)) {
+    if (!/^image\/(jpeg|png|gif|webp|bmp)$/.test(file.type)) { showMsg('不支援的格式：' + file.name, 'error'); continue; }
+    if (file.size > 20 * 1024 * 1024) { showMsg('圖片超過 20 MB：' + file.name, 'error'); continue; }
+    mediaItems.push({ id: null, name: file.name.replace(/\.[^.]+$/, '') || file.name, fileName: file.name,
+      path: '', preview: URL.createObjectURL(file), duration: 10, file });
+  }
+  document.getElementById('f-images').value = '';
+  renderMedia();
+}
+
+function renderMedia() {
+  const container = document.getElementById('media-list');
+  if (!mediaItems.length) { container.innerHTML = '<div class="empty">尚未選擇圖片</div>'; return; }
+  container.innerHTML = mediaItems.map((item, index) => `
+    <div class="media-card">
+      <img src="${escAttr(item.preview)}" alt="">
+      <div class="media-body">
+        <div class="media-name" title="${escAttr(item.fileName)}">${escHtml(item.fileName)}</div>
+        <div class="duration-row">
+          <span>播放</span>
+          <input type="number" min="1" max="86400" value="${item.duration}" onchange="setDuration(${index},this.value)">
+          <span>秒</span>
+          <button class="btn btn-danger btn-sm" type="button" onclick="removeMedia(${index})">移除</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function setDuration(index, value) {
+  mediaItems[index].duration = Math.max(1, Math.min(86400, parseInt(value, 10) || 10));
+}
+
+function removeMedia(index) {
+  const item = mediaItems[index];
+  if (item.file && item.preview) URL.revokeObjectURL(item.preview);
+  mediaItems.splice(index, 1);
+  renderMedia();
+}
+
+function defaultSchedule() {
+  return { startDate:'', endDate:'', startTime:'', endTime:'', weekdays:[], enable:false };
+}
+
+function setScheduleForm(schedule) {
+  const n = schedule || defaultSchedule();
+  document.getElementById('f-schedule-enabled').checked = n.enable === true || n.enable === 'true';
+  document.getElementById('f-schedule-start-date').value = n.startDate || '';
+  document.getElementById('f-schedule-end-date').value = n.endDate || '';
+  document.getElementById('f-schedule-start-time').value = normalizeTimeInput(n.startTime || '');
+  document.getElementById('f-schedule-end-time').value = normalizeTimeInput(n.endTime || '');
+  const selected = new Set(asArray(n.weekdays).map(v => String(parseInt(v, 10))));
+  document.querySelectorAll('input[name="schedule-weekday"]').forEach(input => { input.checked = selected.has(input.value); });
+  toggleSchedulePanel(false);
+}
+
+function toggleSchedulePanel(fillDefaults) {
+  const enabled = document.getElementById('f-schedule-enabled').checked;
+  const panel = document.getElementById('schedule-panel');
+  panel.style.display = enabled ? '' : 'none';
+  panel.querySelectorAll('input').forEach(input => { input.disabled = !enabled; });
+  if (enabled && fillDefaults) fillScheduleDefaults();
+}
+
+function fillScheduleDefaults() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!document.getElementById('f-schedule-start-date').value) document.getElementById('f-schedule-start-date').value = today;
+  if (!document.getElementById('f-schedule-end-date').value)   document.getElementById('f-schedule-end-date').value = today;
+  if (!document.getElementById('f-schedule-start-time').value) document.getElementById('f-schedule-start-time').value = '00:00:00';
+  if (!document.getElementById('f-schedule-end-time').value)   document.getElementById('f-schedule-end-time').value = '23:59:59';
+}
+
+function readScheduleForm() {
+  const enabled = document.getElementById('f-schedule-enabled').checked;
+  if (!enabled) return defaultSchedule();
+  const startDate = document.getElementById('f-schedule-start-date').value;
+  const endDate   = document.getElementById('f-schedule-end-date').value;
+  const startTime = normalizeScheduleTime(document.getElementById('f-schedule-start-time').value);
+  const endTime   = normalizeScheduleTime(document.getElementById('f-schedule-end-time').value);
+  if (!startDate || !endDate || !startTime || !endTime) { showMsg('請填寫開始/結束日期與時間。', 'error'); return null; }
+  if (startDate > endDate) { showMsg('結束日期不可早於開始日期。', 'error'); return null; }
+  return { startDate, endDate, startTime, endTime,
+    weekdays: Array.from(document.querySelectorAll('input[name="schedule-weekday"]:checked')).map(i => parseInt(i.value, 10)),
+    enable: true };
+}
+
+function normalizeTimeInput(value) {
+  const text = String(value || '').trim();
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  if (/^\d{2}:\d{2}$/.test(text)) return text + ':00';
+  return '';
+}
+
+function normalizeScheduleTime(value) { return normalizeTimeInput(value); }
+
+function showMsg(text, type) {
+  const area = document.getElementById('msg-area');
+  area.innerHTML = '<div class="msg msg-' + type + '">' + escHtml(text) + '</div>';
+  if (type === 'success') setTimeout(() => area.innerHTML = '', 4000);
+}
+
+function clearMsg() { document.getElementById('msg-area').innerHTML = ''; }
+
+function setStatus(id, text, state) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'status-value status-' + state;
+}
+
+async function loadDeviceStatus() {
+  setStatus('device-registry-status', '檢查中...', 'warn');
+  setStatus('device-connection-status', '檢查中...', 'warn');
+  setStatus('device-signage-status', '檢查中...', 'warn');
+  try {
+    const deviceResponse = await fetch('/v1/' + encodeURIComponent(SCOPE_ID) + '/devices/' + encodeURIComponent(DEVICE_ID), { headers: jsonHeaders() });
+    if (deviceResponse.status === 404) {
+      setStatus('device-registry-status', '找不到此裝置', 'bad');
+      setStatus('device-connection-status', '無法判斷', 'bad');
+      setStatus('device-signage-status', '無法判斷', 'bad');
+      return;
+    }
+    if (!deviceResponse.ok) throw new Error('HTTP ' + deviceResponse.status);
+    const device = await deviceResponse.json();
+    deviceClientId = device.clientId || '';
+    setStatus('device-registry-status', device.clientId || '已註冊', 'ok');
+    const apps = String(device.applicationIdentifiers || '').split(',').map(v => v.trim());
+    const signageSupported = apps.includes('SIGNAGE-V1');
+    setStatus('device-signage-status', signageSupported ? '支援 SIGNAGE-V1' : '未宣告 SIGNAGE-V1', signageSupported ? 'ok' : 'bad');
+    if (!device.connectionId) { setStatus('device-connection-status', '尚未建立連線', 'bad'); return; }
+    const connectionResponse = await fetch('/v1/' + encodeURIComponent(SCOPE_ID) + '/deviceconnections/' + encodeURIComponent(device.connectionId), { headers: jsonHeaders() });
+    if (!connectionResponse.ok) { setStatus('device-connection-status', '查不到連線', 'bad'); return; }
+    const connection = await connectionResponse.json();
+    const status = connection.status || 'UNKNOWN';
+    const modifiedOn = connection.modifiedOn ? new Date(connection.modifiedOn) : null;
+    const ageSec = modifiedOn ? Math.floor((Date.now() - modifiedOn.getTime()) / 1000) : -1;
+    function fmtAge(sec) {
+      if (sec < 0) return '未知';
+      if (sec < 60) return sec + ' 秒前';
+      if (sec < 3600) return Math.floor(sec / 60) + ' 分鐘前';
+      return Math.floor(sec / 3600) + ' 小時前';
+    }
+    if (status !== 'CONNECTED') { deviceConnected = false; setStatus('device-connection-status', status + (ageSec >= 0 ? '（' + fmtAge(ageSec) + '斷線）' : ''), 'bad'); return; }
+    deviceConnected = true;
+    try {
+      const presenceResp = await fetch('/mqtt-presence?clientId=' + encodeURIComponent(deviceClientId));
+      if (presenceResp.ok) {
+        const p = await presenceResp.json();
+        if (p.status === 'ONLINE') { setStatus('device-connection-status', 'MQTT 即時在線（' + fmtAge(p.lastSeenAgo) + '活躍）', 'ok'); return; }
+        if (p.status === 'OFFLINE') { deviceConnected = false; setStatus('device-connection-status', 'MQTT 已離線', 'bad'); return; }
+      }
+    } catch (_) {}
+    if (ageSec < 0) setStatus('device-connection-status', 'CONNECTED（連線時間未知）', 'warn');
+    else if (ageSec < 300) setStatus('device-connection-status', 'CONNECTED（' + fmtAge(ageSec) + '，可信）', 'ok');
+    else if (ageSec < 3600) setStatus('device-connection-status', 'CONNECTED（' + fmtAge(ageSec) + '，請確認）', 'warn');
+    else setStatus('device-connection-status', 'CONNECTED（' + fmtAge(ageSec) + '，狀態可能陳舊）', 'warn');
+  } catch (e) {
+    setStatus('device-registry-status', '檢查失敗', 'bad');
+    setStatus('device-connection-status', '檢查失敗', 'bad');
+    setStatus('device-signage-status', '檢查失敗', 'bad');
+  }
+}
+
+function setAppearanceConfigStatus(text, state) {
+  const el = document.getElementById('appearance-config-status');
+  el.textContent = text;
+  el.className = 'inline-status' + (state ? ' ' + state : '');
+}
+
+function setToggle(input) {
+  var track = document.getElementById('overlay-track');
+  var label = document.getElementById('overlay-label');
+  if (track) track.classList[input.checked ? 'add' : 'remove']('is-on');
+  if (label) label.textContent = input.checked ? 'On' : 'Off';
+}
+
+function setAppearanceBusy(busy) {
+  document.getElementById('appearance-load-btn').disabled = busy;
+  document.getElementById('appearance-save-btn').disabled = busy;
+}
+
+async function loadAppearanceSettings() {
+  if (!TOKEN || !SCOPE_ID || !DEVICE_ID) return;
+  setAppearanceBusy(true);
+  setAppearanceConfigStatus('讀取中...', 'loading');
+  try {
+    const response = await fetch(APPEARANCE_BASE() + '?timeout=5000', { method:'GET', headers:jsonHeaders() });
+    const result = await readJson(response);
+    if (!response.ok) throw new Error(apiErrorMessage(response, result, 'Appearance 讀取失敗'));
+    const config = findAppearanceConfig(result);
+    const overlayEl = document.getElementById('appearance-overlay');
+    overlayEl.checked = readConfigProperty(config, 'SignageOverlayConfig', '1') === '0';
+    setToggle(overlayEl);
+    setAppearanceConfigStatus('已讀取', 'success');
+  } catch (e) {
+    setAppearanceConfigStatus(e.message, 'error');
+  } finally {
+    setAppearanceBusy(false);
+  }
+}
+
+async function saveAppearanceSettings() {
+  if (!TOKEN || !SCOPE_ID || !DEVICE_ID) return;
+  setAppearanceBusy(true);
+  setAppearanceConfigStatus('套用中...', 'loading');
+  try {
+    const response = await fetch(APPEARANCE_BASE() + '?timeout=5000', {
+      method:'PUT', headers:jsonHeaders(), body:JSON.stringify(buildAppearanceConfigPayload())
+    });
+    const result = await readJson(response);
+    if (!response.ok) throw new Error(apiErrorMessage(response, result, 'Appearance 套用失敗'));
+    setAppearanceConfigStatus('已套用到裝置', 'success');
+  } catch (e) {
+    setAppearanceConfigStatus(e.message, 'error');
+  } finally {
+    setAppearanceBusy(false);
+    loadDeviceStatus();
+  }
+}
+
+function buildAppearanceConfigPayload() {
+  const overlayOn = document.getElementById('appearance-overlay').checked;
+  return {
+    id: APPEARANCE_CONFIG_ID,
+    properties: { property: [
+      buildIntegerProperty('BackgroundConfig', '1'),
+      buildIntegerProperty('SignageOverlayConfig', overlayOn ? '0' : '1')
+    ]}
+  };
+}
+
+function buildIntegerProperty(name, value) {
+  return { name, array:false, encrypted:false, type:'Integer', value:[String(value)] };
+}
+
+function findAppearanceConfig(payload) {
+  if (!payload) return null;
+  if (payload.id === APPEARANCE_CONFIG_ID || payload.properties) return payload;
+  const candidates = [].concat(asArray(payload.configuration)).concat(asArray(payload.configurations))
+    .concat(asArray(payload.componentConfigurations));
+  return candidates.find(item => item && item.id === APPEARANCE_CONFIG_ID) || null;
+}
+
+function readConfigProperty(config, name, fallback) {
+  if (!config || !config.properties) return fallback;
+  if (Object.prototype.hasOwnProperty.call(config.properties, name)) return firstConfigValue(config.properties[name], fallback);
+  const properties = asArray(config.properties.property);
+  const property = properties.find(item => item && item.name === name);
+  return property ? firstConfigValue(property.value, fallback) : fallback;
+}
+
+function firstConfigValue(value, fallback) {
+  if (Array.isArray(value)) return value.length ? String(value[0]) : fallback;
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value);
+}
+
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+async function loadList() {
+  document.getElementById('spinner').style.display = 'inline';
+  try {
+    const response = await fetch(BASE() + '/_query?timeout=10000', { method:'POST', headers:jsonHeaders(), body:'{}' });
+    if (!response.ok) { showMsg('載入失敗 (HTTP ' + response.status + ')', 'error'); return; }
+    const list = await response.json();
+    renderList(asArray(list));
+  } catch (e) {
+    showMsg('網路錯誤：' + e.message, 'error');
+  } finally {
+    document.getElementById('spinner').style.display = 'none';
+  }
+}
+
+function renderList(playlists) {
+  const container = document.getElementById('list-container');
+  if (!playlists.length) { container.innerHTML = '<div class="empty">尚無播放清單。點擊「新增播放清單」開始建立。</div>'; return; }
+  let html = '<table><thead><tr><th>名稱</th><th>圖片</th><th>圖片數</th><th>排程</th><th>派送狀態</th><th>操作</th></tr></thead><tbody>';
+  for (const playlist of playlists) {
+    const resources = Array.isArray(playlist.resources) ? playlist.resources : [];
+    const thumbs = resources.slice(0, 3).map(r => '<img src="' + escAttr(absoluteMediaUrl(r.path || '')) + '" alt="">').join('');
+    const encoded = encodeURIComponent(JSON.stringify(playlist));
+    html += '<tr>' +
+      '<td>' + escHtml(playlist.listName || '(未命名)') + '</td>' +
+      '<td><div class="thumbs">' + (thumbs || '-') + '</div></td>' +
+      '<td>' + resources.length + '</td>' +
+      '<td>' + scheduleCell(playlist) + '</td>' +
+      '<td title="' + escAttr(playlist.lastError || '') + '">' + escHtml(playlist.deliveryStatus || 'UNKNOWN') + '</td>' +
+      '<td>' +
+        '<button class="btn btn-primary btn-sm" onclick="playPlaylist(\'' + escAttr(playlist.id) + '\')">傳送／播放</button> ' +
+        '<button class="btn btn-secondary btn-sm" onclick="showEdit(JSON.parse(decodeURIComponent(\'' + encoded + '\')))">編輯</button> ' +
+        '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'' + escAttr(playlist.id) + '\',\'' + escAttr(playlist.listName || '') + '\')">刪除</button>' +
+      '</td></tr>';
+  }
+  container.innerHTML = html + '</tbody></table>';
+}
+
+function scheduleCell(playlist) {
+  const schedule = playlist.schedule || {};
+  if (!(schedule.enable === true || schedule.enable === 'true')) return '<span class="schedule-detail">預設播放</span>';
+  const dateText = [schedule.startDate || '', schedule.endDate || ''].filter(Boolean).join(' ~ ');
+  const timeText = [schedule.startTime || '', schedule.endTime || ''].filter(Boolean).join(' ~ ');
+  return '<div class="schedule-summary">排定行程</div>' +
+    '<div class="schedule-detail">' + escHtml(dateText || '-') + '<br>' + escHtml(timeText || '-') + '<br>' + escHtml(weekdaySummary(schedule.weekdays)) + '</div>';
+}
+
+function weekdaySummary(days) {
+  const values = asArray(days).map(v => parseInt(v, 10)).filter(v => WEEKDAY_LABELS[v]);
+  if (!values.length) return '每天';
+  return values.map(v => WEEKDAY_LABELS[v]).join('、');
+}
+
+async function playPlaylist(id) {
+  clearMsg();
+  try {
+    const response = await fetch(BASE() + '/play_playlist/' + encodeURIComponent(id) + '?timeout=5000', { method:'POST', headers:jsonHeaders(), body:'{}' });
+    const result = await readJson(response);
+    if (response.ok && result && result.controlTimeout) showMsg(controlTimeoutMessage('播放命令已送出，但裝置尚未確認'), 'info');
+    else if (response.ok) showMsg('播放清單已傳送到裝置。', 'success');
+    else throw new Error(apiErrorMessage(response, result, '傳送失敗'));
+  } catch (e) {
+    showMsg(e.message, 'error');
+  } finally {
+    loadDeviceStatus();
+  }
+}
+
+async function uploadImage(item) {
+  const response = await fetch(BASE() + '/media', {
+    method:'POST',
+    headers:{ 'Authorization':'Bearer ' + TOKEN, 'Content-Type':item.file.type, 'X-File-Name':item.file.name, 'Accept':'application/json' },
+    body:item.file
+  });
+  if (!response.ok) throw new Error(item.file.name + ' 上傳失敗 (HTTP ' + response.status + ')');
+  const uploaded = await response.json();
+  item.id = uploaded.id; item.name = 'Image-' + uploaded.id; item.fileName = item.file.name;
+  item.path = uploaded.path; item.url = uploaded.url;
+  item.preview = uploaded.url || absoluteMediaUrl(uploaded.path);
+  item.contentType = uploaded.contentType; item.size = uploaded.size; item.sha256 = uploaded.sha256;
+  item.file = null;
+}
+
+async function savePlaylist() {
+  const listName = document.getElementById('f-listName').value.trim();
+  if (!listName) { showMsg('請填寫播放清單名稱', 'error'); return; }
+  if (!mediaItems.length) { showMsg('請至少選擇一張圖片', 'error'); return; }
+  const schedule = readScheduleForm();
+  if (!schedule) return;
+  const button = document.getElementById('save-btn');
+  const status = document.getElementById('save-status');
+  button.disabled = true;
+  status.style.display = 'inline';
+  clearMsg();
+  try {
+    for (const item of mediaItems) { if (item.file) await uploadImage(item); }
+    const body = {
+      listName,
+      listType: schedule.enable ? 1 : 0,
+      playContent: mediaItems.map(item => ({ appName:'Image', duration:secondsToDuration(item.duration), action:'show', parameters:[{id:'image',value:'$'+item.name}] })),
+      resources: mediaItems.map(item => ({ name:item.name, id:item.id, fileName:item.fileName, path:item.path, url:item.url||absoluteMediaUrl(item.path), contentType:item.contentType||'', size:item.size||0, sha256:item.sha256||'' })),
+      schedule,
+      entityAttributes: {}
+    };
+    const url = editingId
+      ? BASE() + '/update_playlist/' + encodeURIComponent(editingId) + '?timeout=5000'
+      : BASE() + '/create_playlist?timeout=5000';
+    const response = await fetch(url, { method:editingId ? 'PUT' : 'POST', headers:jsonHeaders(), body:JSON.stringify(body) });
+    const result = await readJson(response);
+    if (response.ok && result && result.controlTimeout) showMsg(controlTimeoutMessage('已儲存至伺服器'), 'info');
+    else if (response.ok) showMsg('已儲存並傳送到裝置播放。', 'success');
+    else throw new Error(apiErrorMessage(response, result, '儲存失敗'));
+    showList();
+    loadList();
+  } catch (e) {
+    showMsg(e.message, 'error');
+  } finally {
+    button.disabled = false;
+    status.style.display = 'none';
+  }
+}
+
+async function confirmDelete(id, name) {
+  if (!confirm('確定要刪除播放清單「' + name + '」？')) return;
+  try {
+    const response = await fetch(BASE() + '/delete_playlist/' + encodeURIComponent(id) + '?timeout=5000', { method:'DELETE', headers:jsonHeaders() });
+    const result = await readJson(response);
+    if (response.ok && result && result.controlTimeout) showMsg(controlTimeoutMessage('已從 CMS 刪除，但裝置尚未確認'), 'info');
+    else if (response.ok) showMsg('已刪除並通知裝置。', 'success');
+    else throw new Error(apiErrorMessage(response, result, '刪除失敗'));
+    loadList();
+  } catch (e) {
+    showMsg(e.message, 'error');
+  }
+}
+
+function absoluteMediaUrl(path) {
+  if (!path) return '';
+  try { return new URL(path, location.origin).href; } catch (e) { return path; }
+}
+
+function secondsToDuration(value) {
+  const total = Math.max(1, parseInt(value, 10) || 10);
+  return Math.floor(total / 3600) + ':' + Math.floor((total % 3600) / 60) + ':' + (total % 60);
+}
+
+function durationToSeconds(value) {
+  const text = String(value || '');
+  if (!text.includes(':')) return Math.max(1, parseInt(text, 10) || 10);
+  const parts = text.split(':').map(p => parseInt(p, 10) || 0);
+  while (parts.length < 3) parts.unshift(0);
+  return Math.max(1, parts[0] * 3600 + parts[1] * 60 + parts[2]);
+}
+
+async function readJson(response) {
+  try { return await response.clone().json(); } catch (e) { return null; }
+}
+
+function controlTimeoutMessage(prefix) {
+  if (!deviceConnected) return prefix + '；裝置 MQTT 目前未連線。';
+  return prefix + '；裝置已連線但尚未確認。';
+}
+
+function apiErrorMessage(response, result, prefix) {
+  const detail = result && (result.message || result.error || result.kapuaErrorCode);
+  return prefix + ' (HTTP ' + response.status + ')' + (detail ? '：' + detail : '');
+}
+
+function escHtml(value) {
+  return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+function escAttr(value) { return escHtml(value).replace(/`/g, '&#96;'); }
+
+// Enter key on login
+document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('login-user').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass').focus(); });
+</script>
+</body>
+</html>

@@ -32,8 +32,16 @@
   .form-card{background:#fff;border-radius:6px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
   .form-row{margin-bottom:16px}
   label{display:block;font-size:12px;font-weight:500;color:#555;margin-bottom:5px}
-  input[type=text],input[type=number]{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px}
-  input:focus{border-color:#1a73e8;outline:none;box-shadow:0 0 0 2px rgba(26,115,232,.15)}
+  input[type=text],input[type=number],input[type=date],input[type=time],select{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;background:#fff}
+  input:focus,select:focus{border-color:#1a73e8;outline:none;box-shadow:0 0 0 2px rgba(26,115,232,.15)}
+  .appearance-panel{margin-bottom:14px}
+  .panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+  .panel-heading h2{margin-bottom:0}
+  .config-grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:14px}
+  .inline-status{font-size:12px;color:#777}
+  .inline-status.loading{color:#1a73e8}
+  .inline-status.success{color:#137333}
+  .inline-status.error{color:#c5221f}
   .upload-box{border:2px dashed #b7c8e6;border-radius:8px;padding:22px;text-align:center;background:#f8fbff}
   .upload-box input{display:none}
   .upload-help{color:#777;font-size:12px;margin-top:8px}
@@ -45,6 +53,22 @@
   .duration-row{display:flex;align-items:center;gap:7px}
   .duration-row input{width:72px}
   .duration-row .btn{margin-left:auto}
+  .schedule-toggle{display:inline-flex;align-items:center;gap:8px;margin-bottom:0;cursor:pointer;color:#333}
+  .schedule-toggle input{width:auto}
+  /* iOS-style toggle switch */
+  .tog{display:inline-flex !important;align-items:center;gap:12px;cursor:pointer;user-select:none;margin-bottom:0}
+  .tog input{display:none !important}
+  .tog-track{position:relative;width:48px;height:26px;background:#ccc;border-radius:13px;transition:background .22s;flex-shrink:0}
+  .tog-track::after{content:'';position:absolute;width:22px;height:22px;background:#fff;border-radius:50%;top:2px;left:2px;transition:transform .22s;box-shadow:0 1px 4px rgba(0,0,0,.28)}
+  .tog-track.is-on{background:#1a73e8}
+  .tog-track.is-on::after{transform:translateX(22px)}
+  .tog-label{font-size:14px;font-weight:500;color:#333;min-width:28px}
+  .schedule-panel{border:1px solid #e0e0e0;border-radius:6px;padding:14px;margin:4px 0 16px;background:#fbfbfb}
+  .weekday-group{display:flex;flex-wrap:wrap;gap:8px}
+  .weekday-option{display:inline-flex;align-items:center;gap:5px;border:1px solid #d9dce1;border-radius:4px;padding:7px 9px;background:#fff;cursor:pointer}
+  .weekday-option input{width:auto}
+  .schedule-summary{font-weight:600;color:#1a73e8}
+  .schedule-detail{font-size:11px;color:#666;margin-top:3px;line-height:1.4}
   .thumbs{display:flex;gap:4px}
   .thumbs img{width:42px;height:32px;object-fit:cover;border-radius:3px;background:#eee}
   .empty{padding:32px;text-align:center;color:#999;background:#fff;border-radius:6px}
@@ -68,6 +92,25 @@
       <div id="device-signage-status" class="status-value status-warn">檢查中...</div>
     </div>
   </div>
+
+  <div id="appearance-panel" class="form-card appearance-panel">
+    <div class="panel-heading">
+      <h2>Appearance</h2>
+      <span id="appearance-config-status" class="inline-status">尚未讀取</span>
+    </div>
+    <div class="form-row">
+      <label class="tog">
+        <input type="checkbox" id="appearance-overlay" onchange="setToggle(this)">
+        <span class="tog-track" id="overlay-track"></span>
+        <span class="tog-label" id="overlay-label">Off</span>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button id="appearance-load-btn" class="btn btn-secondary" onclick="loadAppearanceSettings()">讀取設定</button>
+      <button id="appearance-save-btn" class="btn btn-primary" onclick="saveAppearanceSettings()">套用 Appearance</button>
+    </div>
+  </div>
+
   <div id="view-list">
     <h2>Signage 播放清單</h2>
     <div class="toolbar">
@@ -96,6 +139,45 @@
         <div id="media-list" class="media-list"></div>
       </div>
 
+      <div class="form-row">
+        <label class="schedule-toggle">
+          <input type="checkbox" id="f-schedule-enabled" onchange="toggleSchedulePanel(true)">
+          啟用排定行程
+        </label>
+      </div>
+      <div id="schedule-panel" class="schedule-panel" style="display:none">
+        <div class="config-grid">
+          <div class="form-row">
+            <label for="f-schedule-start-date">開始日期</label>
+            <input type="date" id="f-schedule-start-date">
+          </div>
+          <div class="form-row">
+            <label for="f-schedule-end-date">結束日期</label>
+            <input type="date" id="f-schedule-end-date">
+          </div>
+          <div class="form-row">
+            <label for="f-schedule-start-time">開始時間</label>
+            <input type="time" id="f-schedule-start-time" step="1">
+          </div>
+          <div class="form-row">
+            <label for="f-schedule-end-time">結束時間</label>
+            <input type="time" id="f-schedule-end-time" step="1">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>播放星期</label>
+          <div class="weekday-group">
+            <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="1">日</label>
+            <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="2">一</label>
+            <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="3">二</label>
+            <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="4">三</label>
+            <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="5">四</label>
+            <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="6">五</label>
+            <label class="weekday-option"><input type="checkbox" name="schedule-weekday" value="7">六</label>
+          </div>
+        </div>
+      </div>
+
       <div class="form-actions">
         <button id="save-btn" class="btn btn-primary" onclick="savePlaylist()">儲存並傳送到裝置</button>
         <button class="btn btn-secondary" onclick="showList()">取消</button>
@@ -111,12 +193,24 @@ const TOKEN = parts[0] || '';
 const SCOPE_ID = parts[1] || '';
 const DEVICE_ID = parts[2] || '';
 const BASE = `/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/digitalsignage`;
+const APPEARANCE_CONFIG_ID = 'com.PeerInternet.Appearance.Config';
+const APPEARANCE_BASE =
+  `/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/configurations/${encodeURIComponent(APPEARANCE_CONFIG_ID)}`;
 const JSON_HEADERS = {'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json','Accept':'application/json'};
 
 let editingId = null;
 let mediaItems = [];
 let deviceConnected = false;
 let deviceClientId = '';
+const WEEKDAY_LABELS = {
+  1: '日',
+  2: '一',
+  3: '二',
+  4: '三',
+  5: '四',
+  6: '五',
+  7: '六'
+};
 
 function showList() {
   document.getElementById('view-list').style.display = '';
@@ -130,6 +224,7 @@ function showCreate() {
   document.getElementById('form-title').textContent = '新增播放清單';
   document.getElementById('f-listName').value = '';
   document.getElementById('f-images').value = '';
+  setScheduleForm(defaultSchedule());
   document.getElementById('view-list').style.display = 'none';
   document.getElementById('view-form').style.display = '';
   renderMedia();
@@ -163,6 +258,7 @@ function showEdit(pl) {
   document.getElementById('form-title').textContent = '編輯播放清單';
   document.getElementById('f-listName').value = pl.listName || '';
   document.getElementById('f-images').value = '';
+  setScheduleForm(pl.schedule || defaultSchedule());
   document.getElementById('view-list').style.display = 'none';
   document.getElementById('view-form').style.display = '';
   renderMedia();
@@ -223,6 +319,102 @@ function removeMedia(index) {
   if (item.file && item.preview) URL.revokeObjectURL(item.preview);
   mediaItems.splice(index, 1);
   renderMedia();
+}
+
+function defaultSchedule() {
+  return {
+    startDate: '',
+    endDate: '',
+    startTime: '',
+    endTime: '',
+    weekdays: [],
+    enable: false
+  };
+}
+
+function setScheduleForm(schedule) {
+  const normalized = schedule || defaultSchedule();
+  document.getElementById('f-schedule-enabled').checked =
+    normalized.enable === true || normalized.enable === 'true';
+  document.getElementById('f-schedule-start-date').value = normalized.startDate || '';
+  document.getElementById('f-schedule-end-date').value = normalized.endDate || '';
+  document.getElementById('f-schedule-start-time').value =
+    normalizeTimeInput(normalized.startTime || '');
+  document.getElementById('f-schedule-end-time').value =
+    normalizeTimeInput(normalized.endTime || '');
+  const selected = new Set(asArray(normalized.weekdays).map(value => String(parseInt(value, 10))));
+  document.querySelectorAll('input[name="schedule-weekday"]').forEach(input => {
+    input.checked = selected.has(input.value);
+  });
+  toggleSchedulePanel(false);
+}
+
+function toggleSchedulePanel(fillDefaults) {
+  const enabled = document.getElementById('f-schedule-enabled').checked;
+  const panel = document.getElementById('schedule-panel');
+  panel.style.display = enabled ? '' : 'none';
+  panel.querySelectorAll('input').forEach(input => {
+    input.disabled = !enabled;
+  });
+  if (enabled && fillDefaults) fillScheduleDefaults();
+}
+
+function fillScheduleDefaults() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!document.getElementById('f-schedule-start-date').value) {
+    document.getElementById('f-schedule-start-date').value = today;
+  }
+  if (!document.getElementById('f-schedule-end-date').value) {
+    document.getElementById('f-schedule-end-date').value = today;
+  }
+  if (!document.getElementById('f-schedule-start-time').value) {
+    document.getElementById('f-schedule-start-time').value = '00:00:00';
+  }
+  if (!document.getElementById('f-schedule-end-time').value) {
+    document.getElementById('f-schedule-end-time').value = '23:59:59';
+  }
+}
+
+function readScheduleForm() {
+  const enabled = document.getElementById('f-schedule-enabled').checked;
+  if (!enabled) return defaultSchedule();
+
+  const startDate = document.getElementById('f-schedule-start-date').value;
+  const endDate = document.getElementById('f-schedule-end-date').value;
+  const startTime = normalizeScheduleTime(
+    document.getElementById('f-schedule-start-time').value);
+  const endTime = normalizeScheduleTime(
+    document.getElementById('f-schedule-end-time').value);
+
+  if (!startDate || !endDate || !startTime || !endTime) {
+    showMsg('啟用排定行程時，請填寫開始/結束日期與時間。', 'error');
+    return null;
+  }
+  if (startDate > endDate) {
+    showMsg('排定行程的結束日期不可早於開始日期。', 'error');
+    return null;
+  }
+
+  return {
+    startDate,
+    endDate,
+    startTime,
+    endTime,
+    weekdays: Array.from(document.querySelectorAll('input[name="schedule-weekday"]:checked'))
+      .map(input => parseInt(input.value, 10)),
+    enable: true
+  };
+}
+
+function normalizeTimeInput(value) {
+  const text = String(value || '').trim();
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  if (/^\d{2}:\d{2}$/.test(text)) return text + ':00';
+  return '';
+}
+
+function normalizeScheduleTime(value) {
+  return normalizeTimeInput(value);
 }
 
 function showMsg(text, type) {
@@ -350,6 +542,127 @@ async function loadDeviceStatus() {
   }
 }
 
+function setAppearanceConfigStatus(text, state) {
+  const element = document.getElementById('appearance-config-status');
+  element.textContent = text;
+  element.className = 'inline-status' + (state ? ' ' + state : '');
+}
+
+function setToggle(input) {
+  var track = document.getElementById('overlay-track');
+  var label = document.getElementById('overlay-label');
+  if (track) track.classList[input.checked ? 'add' : 'remove']('is-on');
+  if (label) label.textContent = input.checked ? 'On' : 'Off';
+}
+
+function setAppearanceBusy(busy) {
+  document.getElementById('appearance-load-btn').disabled = busy;
+  document.getElementById('appearance-save-btn').disabled = busy;
+}
+
+async function loadAppearanceSettings() {
+  if (!TOKEN || !SCOPE_ID || !DEVICE_ID) return;
+  setAppearanceBusy(true);
+  setAppearanceConfigStatus('讀取中...', 'loading');
+  try {
+    const response = await fetch(APPEARANCE_BASE + '?timeout=5000', {
+      method: 'GET',
+      headers: JSON_HEADERS
+    });
+    const result = await readJson(response);
+    if (!response.ok) {
+      throw new Error(apiErrorMessage(response, result, 'Appearance 設定讀取失敗'));
+    }
+    const config = findAppearanceConfig(result);
+    const overlayEl = document.getElementById('appearance-overlay');
+    overlayEl.checked = readConfigProperty(config, 'SignageOverlayConfig', '1') === '0';
+    setToggle(overlayEl);
+    setAppearanceConfigStatus('已讀取', 'success');
+  } catch (error) {
+    setAppearanceConfigStatus(error.message, 'error');
+  } finally {
+    setAppearanceBusy(false);
+  }
+}
+
+async function saveAppearanceSettings() {
+  if (!TOKEN || !SCOPE_ID || !DEVICE_ID) return;
+  setAppearanceBusy(true);
+  setAppearanceConfigStatus('套用中...', 'loading');
+  try {
+    const response = await fetch(APPEARANCE_BASE + '?timeout=5000', {
+      method: 'PUT',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(buildAppearanceConfigPayload())
+    });
+    const result = await readJson(response);
+    if (!response.ok) {
+      throw new Error(apiErrorMessage(response, result, 'Appearance 設定套用失敗'));
+    }
+    setAppearanceConfigStatus('已套用到裝置', 'success');
+  } catch (error) {
+    setAppearanceConfigStatus(error.message, 'error');
+  } finally {
+    setAppearanceBusy(false);
+    loadDeviceStatus();
+  }
+}
+
+function buildAppearanceConfigPayload() {
+  const overlayOn = document.getElementById('appearance-overlay').checked;
+  return {
+    id: APPEARANCE_CONFIG_ID,
+    properties: {
+      property: [
+        buildIntegerProperty('BackgroundConfig', '1'),
+        buildIntegerProperty('SignageOverlayConfig', overlayOn ? '0' : '1')
+      ]
+    }
+  };
+}
+
+function buildIntegerProperty(name, value) {
+  return {
+    name,
+    array: false,
+    encrypted: false,
+    type: 'Integer',
+    value: [String(value)]
+  };
+}
+
+function findAppearanceConfig(payload) {
+  if (!payload) return null;
+  if (payload.id === APPEARANCE_CONFIG_ID || payload.properties) return payload;
+  const candidates = []
+    .concat(asArray(payload.configuration))
+    .concat(asArray(payload.configurations))
+    .concat(asArray(payload.componentConfigurations))
+    .concat(asArray(payload.componentConfigurations && payload.componentConfigurations.configuration));
+  return candidates.find(item => item && item.id === APPEARANCE_CONFIG_ID) || null;
+}
+
+function readConfigProperty(config, name, fallback) {
+  if (!config || !config.properties) return fallback;
+  if (Object.prototype.hasOwnProperty.call(config.properties, name)) {
+    return firstConfigValue(config.properties[name], fallback);
+  }
+  const properties = asArray(config.properties.property);
+  const property = properties.find(item => item && item.name === name);
+  return property ? firstConfigValue(property.value, fallback) : fallback;
+}
+
+function firstConfigValue(value, fallback) {
+  if (Array.isArray(value)) return value.length ? String(value[0]) : fallback;
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value);
+}
+
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 async function loadList() {
   document.getElementById('spinner').style.display = 'inline';
   try {
@@ -359,7 +672,7 @@ async function loadList() {
       return;
     }
     const list = await response.json();
-    renderList(Array.isArray(list) ? list : []);
+    renderList(asArray(list));
   } catch (error) {
     showMsg('網路錯誤：' + error.message, 'error');
   } finally {
@@ -373,7 +686,7 @@ function renderList(playlists) {
     container.innerHTML = '<div class="empty">尚無播放清單。點擊「新增播放清單」開始建立。</div>';
     return;
   }
-  let html = '<table><thead><tr><th>名稱</th><th>圖片</th><th>圖片數</th><th>派送狀態</th><th>操作</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>名稱</th><th>圖片</th><th>圖片數</th><th>排程</th><th>派送狀態</th><th>操作</th></tr></thead><tbody>';
   for (const playlist of playlists) {
     const resources = Array.isArray(playlist.resources) ? playlist.resources : [];
     const thumbs = resources.slice(0, 3).map(resource =>
@@ -383,6 +696,7 @@ function renderList(playlists) {
       <td>${escHtml(playlist.listName || '(未命名)')}</td>
       <td><div class="thumbs">${thumbs || '-'}</div></td>
       <td>${resources.length}</td>
+      <td>${scheduleCell(playlist)}</td>
       <td title="${escAttr(playlist.lastError || '')}">${escHtml(playlist.deliveryStatus || 'UNKNOWN')}</td>
       <td>
         <button class="btn btn-primary btn-sm" onclick="playPlaylist('${escAttr(playlist.id)}')">傳送／播放</button>
@@ -392,6 +706,30 @@ function renderList(playlists) {
     </tr>`;
   }
   container.innerHTML = html + '</tbody></table>';
+}
+
+function scheduleCell(playlist) {
+  const schedule = playlist.schedule || {};
+  if (!(schedule.enable === true || schedule.enable === 'true')) {
+    return '<span class="schedule-detail">預設播放</span>';
+  }
+  const dateText = [schedule.startDate || '', schedule.endDate || '']
+    .filter(Boolean)
+    .join(' ~ ');
+  const timeText = [schedule.startTime || '', schedule.endTime || '']
+    .filter(Boolean)
+    .join(' ~ ');
+  const weekdayText = weekdaySummary(schedule.weekdays);
+  return `<div class="schedule-summary">排定行程</div>
+    <div class="schedule-detail">${escHtml(dateText || '-')}<br>${escHtml(timeText || '-')}<br>${escHtml(weekdayText)}</div>`;
+}
+
+function weekdaySummary(days) {
+  const values = asArray(days)
+    .map(value => parseInt(value, 10))
+    .filter(value => WEEKDAY_LABELS[value]);
+  if (!values.length) return '每天';
+  return values.map(value => WEEKDAY_LABELS[value]).join('、');
 }
 
 async function playPlaylist(id) {
@@ -451,6 +789,8 @@ async function savePlaylist() {
     showMsg('請至少選擇一張圖片', 'error');
     return;
   }
+  const schedule = readScheduleForm();
+  if (!schedule) return;
 
   const button = document.getElementById('save-btn');
   const status = document.getElementById('save-status');
@@ -463,7 +803,7 @@ async function savePlaylist() {
     }
     const body = {
       listName,
-      listType: 0,
+      listType: schedule.enable ? 1 : 0,
       playContent: mediaItems.map(item => ({
         appName: 'Image',
         duration: secondsToDuration(item.duration),
@@ -480,14 +820,7 @@ async function savePlaylist() {
         size: item.size || 0,
         sha256: item.sha256 || ''
       })),
-      schedule: {
-        startDate: '',
-        endDate: '',
-        startTime: '',
-        endTime: '',
-        weekdays: [],
-        enable: false
-      },
+      schedule,
       entityAttributes: {}
     };
     const url = editingId
@@ -601,6 +934,7 @@ if (!TOKEN || !SCOPE_ID || !DEVICE_ID) {
     '<div class="empty">缺少認證資訊，請從 Kapua 管理介面開啟此頁面。</div>';
 } else {
   loadDeviceStatus();
+  loadAppearanceSettings();
   loadList();
 }
 </script>

@@ -675,25 +675,11 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
     }
 
     private int normalizedListType(JsonObject source) {
-        JsonObject schedule = source.getJsonObject("schedule");
-        return schedule != null && schedule.getBoolean("enable", false)
-                ? source.getInt("listType", 1)
-                : 0;
+        return SignageScheduleNormalizer.normalizedListType(source);
     }
 
     private JsonObject normalizedSchedule(JsonObject source) {
-        JsonObject schedule = source.getJsonObject("schedule");
-        if (schedule != null) {
-            return schedule;
-        }
-        return Json.createObjectBuilder()
-                .add("startDate", "")
-                .add("endDate", "")
-                .add("startTime", "")
-                .add("endTime", "")
-                .add("weekdays", Json.createArrayBuilder())
-                .add("enable", false)
-                .build();
+        return SignageScheduleNormalizer.normalize(source);
     }
 
     private void copyIfPresent(JsonObjectBuilder target, JsonObject source, String key) {
