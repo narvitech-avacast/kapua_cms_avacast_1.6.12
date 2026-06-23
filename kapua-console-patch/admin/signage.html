@@ -58,6 +58,8 @@ table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;over
 th{background:#f8f9fa;padding:10px 12px;text-align:left;font-weight:600;color:#555;border-bottom:2px solid #e0e0e0;font-size:12px}
 td{padding:10px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
 tr:hover td{background:#fafafa}
+tr.row-default td{background:#fffbf0 !important}
+tr.row-default:hover td{background:#fff8e6 !important}
 .msg{padding:10px 14px;border-radius:4px;margin-bottom:10px;font-size:12px}
 .msg-info{background:#e8f0fe;color:#1a73e8}
 .msg-success{background:#e6f4ea;color:#137333}
@@ -244,11 +246,12 @@ input:focus,select:focus{border-color:#1a73e8;outline:none;box-shadow:0 0 0 2px 
           </div>
           <div class="form-row">
             <label class="schedule-toggle">
-              <input type="checkbox" id="f-schedule-enabled" onchange="toggleSchedulePanel(true)">
-              啟用排定行程
+              <input type="checkbox" id="f-is-default" onchange="onDefaultModeChange()">
+              設為預設播放（空檔時播放，無時間限制）
             </label>
           </div>
-          <div id="schedule-panel" class="schedule-panel" style="display:none">
+
+          <div id="schedule-panel" class="schedule-panel">
             <div class="config-grid">
               <div class="form-row">
                 <label for="f-schedule-start-date">開始日期</label>
@@ -298,6 +301,7 @@ let SCOPE_ID = '';
 let DEVICE_ID = '';
 let deviceClientId = '';
 let deviceConnected = false;
+let allPlaylists = [];
 
 const APPEARANCE_CONFIG_ID = 'com.PeerInternet.Appearance.Config';
 const BACKGROUND_IMAGE_LIST_NAME = '__AVA_BACKGROUND_IMAGE__';
@@ -596,7 +600,10 @@ function showCreate() {
   document.getElementById('form-title').textContent = '新增播放清單';
   document.getElementById('f-listName').value = '';
   document.getElementById('f-images').value = '';
+  document.getElementById('f-is-default').checked = false;
+  onDefaultModeChange();
   setScheduleForm(defaultSchedule());
+  fillScheduleDefaults();
   document.getElementById('view-list').style.display = 'none';
   document.getElementById('view-form').style.display = '';
   renderMedia();
@@ -629,6 +636,9 @@ function showEdit(pl) {
   document.getElementById('form-title').textContent = '編輯播放清單';
   document.getElementById('f-listName').value = pl.listName || '';
   document.getElementById('f-images').value = '';
+  const isDefaultPl = !(pl.schedule?.enable === true || pl.schedule?.enable === 'true');
+  document.getElementById('f-is-default').checked = isDefaultPl;
+  onDefaultModeChange();
   setScheduleForm(pl.schedule || defaultSchedule());
   document.getElementById('view-list').style.display = 'none';
   document.getElementById('view-form').style.display = '';
@@ -677,28 +687,19 @@ function removeMedia(index) {
 }
 
 function defaultSchedule() {
-  return { startDate:'', endDate:'', startTime:'', endTime:'', weekdays:[], enable:false };
+  return { startDate:'', endDate:'', startTime:'', endTime:'', weekdays:[], enable:true };
 }
 
 function setScheduleForm(schedule) {
   const n = schedule || defaultSchedule();
-  document.getElementById('f-schedule-enabled').checked = n.enable === true || n.enable === 'true';
   document.getElementById('f-schedule-start-date').value = n.startDate || '';
   document.getElementById('f-schedule-end-date').value = n.endDate || '';
   document.getElementById('f-schedule-start-time').value = normalizeTimeInput(n.startTime || '');
   document.getElementById('f-schedule-end-time').value = normalizeTimeInput(n.endTime || '');
   const selected = new Set(asArray(n.weekdays).map(v => String(parseInt(v, 10))));
   document.querySelectorAll('input[name="schedule-weekday"]').forEach(input => { input.checked = selected.has(input.value); });
-  toggleSchedulePanel(false);
 }
 
-function toggleSchedulePanel(fillDefaults) {
-  const enabled = document.getElementById('f-schedule-enabled').checked;
-  const panel = document.getElementById('schedule-panel');
-  panel.style.display = enabled ? '' : 'none';
-  panel.querySelectorAll('input').forEach(input => { input.disabled = !enabled; });
-  if (enabled && fillDefaults) fillScheduleDefaults();
-}
 
 function fillScheduleDefaults() {
   const today = new Date().toISOString().slice(0, 10);
@@ -708,14 +709,69 @@ function fillScheduleDefaults() {
   if (!document.getElementById('f-schedule-end-time').value)   document.getElementById('f-schedule-end-time').value = '23:59:59';
 }
 
+function onDefaultModeChange() {
+  const isDefault = document.getElementById('f-is-default').checked;
+  document.getElementById('schedule-panel').style.display = isDefault ? 'none' : '';
+}
+
+async function demoteOldDefaults(skipId) {
+  const today = new Date().toISOString().slice(0, 10);
+  const futureDate = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  for (const pl of allPlaylists) {
+    if (pl.id === skipId) continue;
+    const sch = pl.schedule || {};
+    if (!(sch.enable === true || sch.enable === 'true')) {
+      const promoted = {
+        enable: true,
+        startDate: sch.startDate || today,
+        endDate: sch.endDate || futureDate,
+        startTime: sch.startTime || '00:00:00',
+        endTime: sch.endTime || '23:59:59',
+        weekdays: asArray(sch.weekdays)
+      };
+      const body = { ...pl, schedule: promoted, listType: 1 };
+      const resp = await fetch(
+        BASE() + '/update_playlist/' + encodeURIComponent(pl.id) + '?timeout=5000',
+        { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(body) }
+      );
+      if (!resp.ok) {
+        const r = await readJson(resp);
+        throw new Error(apiErrorMessage(resp, r, '更新舊預設清單失敗'));
+      }
+    }
+  }
+}
+
+async function setAsDefault(id) {
+  if (!confirm('確定將此清單設為預設播放？原本的預設播放清單將改為排程播放。')) return;
+  clearMsg();
+  try {
+    await demoteOldDefaults(id);
+    const target = allPlaylists.find(p => p.id === id);
+    if (!target) throw new Error('找不到指定的播放清單');
+    const body = { ...target, schedule: { ...(target.schedule || {}), enable: false }, listType: 0 };
+    const resp = await fetch(
+      BASE() + '/update_playlist/' + encodeURIComponent(id) + '?timeout=5000',
+      { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(body) }
+    );
+    const result = await readJson(resp);
+    if (!resp.ok) throw new Error(apiErrorMessage(resp, result, '設定預設播放失敗'));
+    showMsg('已設為預設播放清單。', 'success');
+    loadList();
+  } catch (e) {
+    showMsg(e.message, 'error');
+  }
+}
+
 function readScheduleForm() {
-  const enabled = document.getElementById('f-schedule-enabled').checked;
-  if (!enabled) return defaultSchedule();
+  if (document.getElementById('f-is-default').checked) {
+    return { enable: false, startDate: '', endDate: '', startTime: '', endTime: '', weekdays: [] };
+  }
   const startDate = document.getElementById('f-schedule-start-date').value;
   const endDate   = document.getElementById('f-schedule-end-date').value;
   const startTime = normalizeScheduleTime(document.getElementById('f-schedule-start-time').value);
   const endTime   = normalizeScheduleTime(document.getElementById('f-schedule-end-time').value);
-  if (!startDate || !endDate || !startTime || !endTime) { showMsg('請填寫開始/結束日期與時間。', 'error'); return null; }
+  if (!startDate || !endDate || !startTime || !endTime) { showMsg('請填寫完整的排程日期與時間（必填）。', 'error'); return null; }
   if (startDate > endDate) { showMsg('結束日期不可早於開始日期。', 'error'); return null; }
   return { startDate, endDate, startTime, endTime,
     weekdays: Array.from(document.querySelectorAll('input[name="schedule-weekday"]:checked')).map(i => parseInt(i.value, 10)),
@@ -913,6 +969,7 @@ async function loadList() {
 
 function renderList(playlists) {
   playlists = playlists.filter(p => p.listName !== BACKGROUND_IMAGE_LIST_NAME);
+  allPlaylists = playlists;
   const container = document.getElementById('list-container');
   if (!playlists.length) { container.innerHTML = '<div class="empty">尚無播放清單。點擊「新增播放清單」開始建立。</div>'; return; }
   let html = '<table><thead><tr><th>名稱</th><th>圖片</th><th>圖片數</th><th>排程</th><th>派送狀態</th><th>操作</th></tr></thead><tbody>';
@@ -920,7 +977,11 @@ function renderList(playlists) {
     const resources = Array.isArray(playlist.resources) ? playlist.resources : [];
     const thumbs = resources.slice(0, 3).map(r => '<img src="' + escAttr(absoluteMediaUrl(r.path || '')) + '" alt="">').join('');
     const encoded = encodeURIComponent(JSON.stringify(playlist));
-    html += '<tr>' +
+    const isDefault = !(playlist.schedule?.enable === true || playlist.schedule?.enable === 'true');
+    const setDefaultBtn = !isDefault
+      ? '<button class="btn btn-secondary btn-sm" style="color:#2e7d32;border-color:#81c784" onclick="setAsDefault(\'' + escAttr(playlist.id) + '\')">設為預設</button> '
+      : '';
+    html += '<tr' + (isDefault ? ' class="row-default"' : '') + '>' +
       '<td>' + escHtml(playlist.listName || '(未命名)') + '</td>' +
       '<td><div class="thumbs">' + (thumbs || '-') + '</div></td>' +
       '<td>' + resources.length + '</td>' +
@@ -929,6 +990,7 @@ function renderList(playlists) {
       '<td>' +
         '<button class="btn btn-primary btn-sm" onclick="playPlaylist(\'' + escAttr(playlist.id) + '\')">傳送／播放</button> ' +
         '<button class="btn btn-secondary btn-sm" onclick="showEdit(JSON.parse(decodeURIComponent(\'' + encoded + '\')))">編輯</button> ' +
+        setDefaultBtn +
         '<button class="btn btn-danger btn-sm" onclick="confirmDelete(\'' + escAttr(playlist.id) + '\',\'' + escAttr(playlist.listName || '') + '\')">刪除</button>' +
       '</td></tr>';
   }
@@ -992,6 +1054,9 @@ async function savePlaylist() {
   status.style.display = 'inline';
   clearMsg();
   try {
+    if (!schedule.enable) {
+      await demoteOldDefaults(editingId);
+    }
     for (const item of mediaItems) { if (item.file) await uploadImage(item); }
     const body = {
       listName,
