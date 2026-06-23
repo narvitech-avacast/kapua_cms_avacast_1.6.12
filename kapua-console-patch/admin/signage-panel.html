@@ -192,10 +192,14 @@ const parts = location.hash.replace('#','').split('/');
 const TOKEN = parts[0] || '';
 const SCOPE_ID = parts[1] || '';
 const DEVICE_ID = parts[2] || '';
-const BASE = `/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/digitalsignage`;
+// Port 8083/8445 is kapua-console direct; API lives behind nginx on port 443.
+const API_ORIGIN = ['8083','8445'].includes(location.port)
+  ? 'https://' + location.hostname
+  : location.origin;
+const BASE = `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/digitalsignage`;
 const APPEARANCE_CONFIG_ID = 'com.PeerInternet.Appearance.Config';
 const APPEARANCE_BASE =
-  `/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/configurations/${encodeURIComponent(APPEARANCE_CONFIG_ID)}`;
+  `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/configurations/${encodeURIComponent(APPEARANCE_CONFIG_ID)}`;
 const JSON_HEADERS = {'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json','Accept':'application/json'};
 
 let editingId = null;
@@ -439,7 +443,7 @@ async function loadDeviceStatus() {
   setStatus('device-signage-status', '檢查中...', 'warn');
   try {
     const deviceResponse = await fetch(
-      `/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}`,
+      `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}`,
       {headers:JSON_HEADERS}
     );
     if (deviceResponse.status === 404) {
@@ -468,7 +472,7 @@ async function loadDeviceStatus() {
       return;
     }
     const connectionResponse = await fetch(
-      `/v1/${encodeURIComponent(SCOPE_ID)}/deviceconnections/${encodeURIComponent(device.connectionId)}`,
+      `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/deviceconnections/${encodeURIComponent(device.connectionId)}`,
       {headers:JSON_HEADERS}
     );
     if (!connectionResponse.ok) {
@@ -499,7 +503,7 @@ async function loadDeviceStatus() {
     // ── Step 1: check MQTT presence (best-effort) ────────────────────────────
     try {
       const presenceResp = await fetch(
-        '/mqtt-presence?clientId=' + encodeURIComponent(deviceClientId)
+        API_ORIGIN + '/mqtt-presence?clientId=' + encodeURIComponent(deviceClientId)
       );
       if (presenceResp.ok) {
         const p = await presenceResp.json();
