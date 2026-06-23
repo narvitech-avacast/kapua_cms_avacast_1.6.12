@@ -99,25 +99,14 @@ if (-not $consolePatchedImg) {
     Write-OK "Console patch image 已是最新版本"
 }
 
-# ---- 3. 偵測容器狀態 -------------------------------------------------------
-Write-Step "偵測容器狀態..."
-$existing = docker ps -a --filter "name=^kapua-api$" --format "{{.Names}}" 2>$null
-$running  = docker ps   --filter "name=^kapua-api$" --format "{{.Names}}" 2>$null
-
+# ---- 3. 啟動容器（有 image 更新則自動重建，已是最新則不重啟）--------------
+Write-Step "啟動容器..."
 Set-Location $COMPOSE_DIR
 $env:IMAGE_VERSION = $IMAGE_VER
 
-if ($running -eq "kapua-api") {
-    Write-Warn "容器已在運行中，無需重複啟動"
-} elseif ($existing -eq "kapua-api") {
-    Write-OK "找到已停止的容器，執行 docker compose start..."
-    docker compose -p $PROJECT start
-    if ($LASTEXITCODE -ne 0) { Write-Fail "docker compose start 失敗" }
-} else {
-    Write-OK "容器不存在，執行 docker compose up -d（全新啟動）..."
-    docker compose -p $PROJECT up -d
-    if ($LASTEXITCODE -ne 0) { Write-Fail "docker compose up 失敗" }
-}
+docker compose -p $PROJECT up -d
+if ($LASTEXITCODE -ne 0) { Write-Fail "docker compose up 失敗" }
+Write-OK "所有容器已確認為最新狀態"
 
 # ---- 4. 最終狀態 -----------------------------------------------------------
 Write-Step "容器狀態"
