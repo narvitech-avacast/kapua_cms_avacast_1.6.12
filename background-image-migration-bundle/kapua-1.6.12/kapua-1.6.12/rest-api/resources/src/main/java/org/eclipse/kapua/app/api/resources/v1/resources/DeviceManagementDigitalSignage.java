@@ -286,9 +286,12 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
                     .entity("{\"error\":\"Playlist not found\"}")
                     .build();
         }
+        // Force schedule.enable=true to ensure device selects the specified playlist,
+        // not falling back to the first/default one
+        String modifiedPayload = forceScheduleEnable(dbPayload);
         updatePlaylistStatus(scopeId, playlistId, "PENDING", null);
         return deliverPersistedPlaylist(
-                scopeId, deviceId, playlistId, timeout, dbPayload, "update_playList", "played");
+                scopeId, deviceId, playlistId, timeout, modifiedPayload, "setup_playList", "played");
     }
 
     /** Create or update a marquee and propagate delivery failures to the REST exception mapper. */
@@ -694,6 +697,52 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
                 .add("weekdays", Json.createArrayBuilder())
                 .add("enable", false)
                 .build();
+    }
+
+    /**
+     * Force schedule.enable=true in the payload to ensure device selects the specified playlist
+     * instead of falling back to the first/default one when receiving a play command.
+     */
+    private String forceScheduleEnable(String dbPayload) {
+        try (JsonReader reader = Json.createReader(new StringReader(dbPayload))) {
+            JsonObject source = reader.readObject();
+            JsonObjectBuilder builder = Json.createObjectBuilder();
+            
+            for (Map.Entry<String, javax.json.JsonValue> entry : source.entrySet()) {
+                String key = entry.getKey();
+                if ("schedule".equals(key)) {
+                    // Force enable=true in schedule
+                    JsonObject schedule = source.getJsonObject("schedule");
+                    JsonObjectBuilder scheduleBuilder = Json.createObjectBuilder();
+                    if (schedule != null) {
+                        for (Map.Entry<String, javax.json.JsonValue> scheduleEntry : schedule.entrySet()) {
+                            scheduleBuilder.add(scheduleEntry.getKey(), scheduleEntry.getValue());
+                        }
+                    }
+                    scheduleBuilder.add("enable", true);
+                    builder.add(key, scheduleBuilder.build());
+                } else {
+                    builder.add(key, entry.getValue());
+                }
+            }
+            
+            // Ensure schedule exists with enable=true
+            if (!source.containsKey("schedule")) {
+                builder.add("schedule", Json.createObjectBuilder()
+                        .add("startDate", "")
+                        .add("endDate", "")
+                        .add("startTime", "")
+                        .add("endTime", "")
+                        .add("weekdays", Json.createArrayBuilder())
+                        .add("enable", true)
+                        .build());
+            }
+            
+            return toJson(builder.build());
+        } catch (RuntimeException e) {
+            LOGGER.warn("Failed to force schedule.enable=true, using original payload", e);
+            return dbPayload;
+        }
     }
 
     private void copyIfPresent(JsonObjectBuilder target, JsonObject source, String key) {
