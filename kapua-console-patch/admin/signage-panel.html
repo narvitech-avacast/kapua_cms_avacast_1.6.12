@@ -111,6 +111,35 @@
     </div>
   </div>
 
+  <div id="background-image-panel" class="form-card appearance-panel">
+    <div class="panel-heading">
+      <h2>背景圖片</h2>
+      <span id="bg-status" class="inline-status">載入中...</span>
+    </div>
+    <div id="bg-current-wrap" style="display:none;margin-bottom:12px">
+      <img id="bg-current-img" src="" alt="目前背景圖片" style="max-width:100%;max-height:180px;border-radius:4px;border:1px solid #ddd;display:block;margin-bottom:6px">
+      <div id="bg-current-name" style="font-size:12px;color:#555"></div>
+    </div>
+    <div class="upload-box" style="margin-bottom:12px">
+      <input type="file" id="bg-file-input" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" onchange="bgSelectFile(this.files[0])">
+      <button class="btn btn-secondary" type="button" onclick="document.getElementById('bg-file-input').click()">選擇圖片</button>
+      <div class="upload-help">支援 JPG、PNG、GIF、WebP、BMP，上限 20 MB</div>
+    </div>
+    <div id="bg-new-wrap" style="display:none;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <img id="bg-new-preview" src="" alt="" style="width:72px;height:52px;object-fit:contain;background:#eee;border-radius:4px;border:1px solid #ddd">
+        <div>
+          <div id="bg-new-name" style="font-size:12px;color:#333;font-weight:500"></div>
+          <button class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="bgClearSelected()">取消選擇</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button id="bg-apply-btn" class="btn btn-primary" onclick="saveBackgroundImage()" disabled>套用背景圖片</button>
+      <button id="bg-remove-btn" class="btn btn-danger" onclick="removeBackgroundImage()" style="display:none">移除背景圖片</button>
+    </div>
+  </div>
+
   <div id="view-list">
     <h2>Signage 播放清單</h2>
     <div class="toolbar">
@@ -201,11 +230,15 @@ const APPEARANCE_CONFIG_ID = 'com.PeerInternet.Appearance.Config';
 const APPEARANCE_BASE =
   `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/configurations/${encodeURIComponent(APPEARANCE_CONFIG_ID)}`;
 const JSON_HEADERS = {'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json','Accept':'application/json'};
+const BACKGROUND_IMAGE_LIST_NAME = '__AVA_BACKGROUND_IMAGE__';
 
 let editingId = null;
 let mediaItems = [];
 let deviceConnected = false;
 let deviceClientId = '';
+let bgCurrentPlaylist = null;
+let bgNewFile = null;
+let bgNewPreviewUrl = null;
 const WEEKDAY_LABELS = {
   1: '日',
   2: '一',
@@ -215,6 +248,143 @@ const WEEKDAY_LABELS = {
   6: '五',
   7: '六'
 };
+
+// ── Background Image ─────────────────────────────────────────────────────────
+
+function bgSelectFile(file) {
+  if (!file) return;
+  if (!/^image\/(jpeg|png|gif|webp|bmp)$/.test(file.type)) { showMsg('不支援的格式：' + file.name, 'error'); return; }
+  if (file.size > 20 * 1024 * 1024) { showMsg('圖片超過 20 MB', 'error'); return; }
+  if (bgNewPreviewUrl) URL.revokeObjectURL(bgNewPreviewUrl);
+  bgNewFile = file;
+  bgNewPreviewUrl = URL.createObjectURL(file);
+  document.getElementById('bg-new-preview').src = bgNewPreviewUrl;
+  document.getElementById('bg-new-name').textContent = file.name;
+  document.getElementById('bg-new-wrap').style.display = '';
+  document.getElementById('bg-apply-btn').disabled = false;
+  document.getElementById('bg-file-input').value = '';
+}
+
+function bgClearSelected() {
+  if (bgNewPreviewUrl) URL.revokeObjectURL(bgNewPreviewUrl);
+  bgNewFile = null;
+  bgNewPreviewUrl = null;
+  document.getElementById('bg-new-wrap').style.display = 'none';
+  document.getElementById('bg-apply-btn').disabled = true;
+  document.getElementById('bg-file-input').value = '';
+}
+
+function setBgStatus(text, state) {
+  const el = document.getElementById('bg-status');
+  el.textContent = text;
+  el.className = 'inline-status' + (state ? ' ' + state : '');
+}
+
+function renderBgPanel() {
+  const currentWrap = document.getElementById('bg-current-wrap');
+  const currentImg  = document.getElementById('bg-current-img');
+  const currentName = document.getElementById('bg-current-name');
+  const removeBtn   = document.getElementById('bg-remove-btn');
+  if (bgCurrentPlaylist) {
+    const resources = bgCurrentPlaylist.resources || [];
+    if (resources.length > 0) {
+      const r = resources[0];
+      currentImg.src = absoluteMediaUrl(r.url || r.path || '');
+      currentName.textContent = r.fileName || r.name || '';
+      currentWrap.style.display = '';
+    } else {
+      currentWrap.style.display = 'none';
+    }
+    removeBtn.style.display = '';
+  } else {
+    currentWrap.style.display = 'none';
+    removeBtn.style.display = 'none';
+  }
+}
+
+async function loadBackgroundImage() {
+  setBgStatus('載入中...', 'loading');
+  try {
+    const resp = await fetch(BASE + '/_query?timeout=10000', {method:'POST', headers:JSON_HEADERS, body:'{}'});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const list = asArray(await resp.json());
+    bgCurrentPlaylist = list.find(p => p.listName === BACKGROUND_IMAGE_LIST_NAME) || null;
+    renderBgPanel();
+    setBgStatus(bgCurrentPlaylist ? '已設定' : '未設定', bgCurrentPlaylist ? 'success' : '');
+  } catch (e) {
+    setBgStatus('載入失敗：' + e.message, 'error');
+  }
+}
+
+async function saveBackgroundImage() {
+  if (!bgNewFile) { showMsg('請先選擇圖片', 'error'); return; }
+  document.getElementById('bg-apply-btn').disabled = true;
+  setBgStatus('上傳中...', 'loading');
+  clearMsg();
+  try {
+    const uploadResp = await fetch(BASE + '/media', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer '+TOKEN, 'Content-Type':bgNewFile.type, 'X-File-Name':bgNewFile.name, 'Accept':'application/json'},
+      body: bgNewFile
+    });
+    if (!uploadResp.ok) throw new Error('圖片上傳失敗 (HTTP ' + uploadResp.status + ')');
+    const uploaded = await uploadResp.json();
+    setBgStatus('傳送中...', 'loading');
+    const mediaName = 'Image-' + uploaded.id;
+    const body = {
+      listName: BACKGROUND_IMAGE_LIST_NAME,
+      listType: 0,
+      playContent: [{appName:'Image', duration:'0:0:10', action:'show', parameters:[{id:'image', value:'$'+mediaName}]}],
+      resources: [{
+        id: uploaded.id, name: mediaName, fileName: bgNewFile.name,
+        path: uploaded.path, url: uploaded.url || absoluteMediaUrl(uploaded.path),
+        contentType: uploaded.contentType || bgNewFile.type, size: uploaded.size || bgNewFile.size, sha256: uploaded.sha256 || ''
+      }],
+      schedule: {startDate:'', endDate:'', startTime:'', endTime:'', weekdays:[], enable:false},
+      entityAttributes: {}
+    };
+    const url = bgCurrentPlaylist
+      ? BASE + '/update_playlist/' + encodeURIComponent(bgCurrentPlaylist.id) + '?timeout=5000'
+      : BASE + '/create_playlist?timeout=5000';
+    const method = bgCurrentPlaylist ? 'PUT' : 'POST';
+    const saveResp = await fetch(url, {method, headers:JSON_HEADERS, body:JSON.stringify(body)});
+    const result = await readJson(saveResp);
+    if (saveResp.ok && result && result.controlTimeout) showMsg(controlTimeoutMessage('背景圖片已儲存，但裝置尚未確認'), 'info');
+    else if (saveResp.ok) showMsg('背景圖片已套用到裝置。', 'success');
+    else throw new Error(apiErrorMessage(saveResp, result, '背景圖片儲存失敗'));
+    bgClearSelected();
+    await loadBackgroundImage();
+  } catch (e) {
+    showMsg(e.message, 'error');
+    setBgStatus('套用失敗', 'error');
+    document.getElementById('bg-apply-btn').disabled = false;
+  }
+}
+
+async function removeBackgroundImage() {
+  if (!bgCurrentPlaylist) return;
+  if (!confirm('確定要移除背景圖片？')) return;
+  setBgStatus('移除中...', 'loading');
+  clearMsg();
+  try {
+    const resp = await fetch(
+      BASE + '/delete_playlist/' + encodeURIComponent(bgCurrentPlaylist.id) + '?timeout=5000',
+      {method:'DELETE', headers:JSON_HEADERS}
+    );
+    const result = await readJson(resp);
+    if (resp.ok && result && result.controlTimeout) showMsg(controlTimeoutMessage('已移除背景圖片，但裝置尚未確認'), 'info');
+    else if (resp.ok) showMsg('背景圖片已移除。', 'success');
+    else throw new Error(apiErrorMessage(resp, result, '移除背景圖片失敗'));
+    bgCurrentPlaylist = null;
+    renderBgPanel();
+    setBgStatus('未設定', '');
+  } catch (e) {
+    showMsg(e.message, 'error');
+    setBgStatus('移除失敗', 'error');
+  }
+}
+
+// ── Playlist list ─────────────────────────────────────────────────────────────
 
 function showList() {
   document.getElementById('view-list').style.display = '';
@@ -685,6 +855,7 @@ async function loadList() {
 }
 
 function renderList(playlists) {
+  playlists = playlists.filter(p => p.listName !== BACKGROUND_IMAGE_LIST_NAME);
   const container = document.getElementById('list-container');
   if (!playlists.length) {
     container.innerHTML = '<div class="empty">尚無播放清單。點擊「新增播放清單」開始建立。</div>';
@@ -939,6 +1110,7 @@ if (!TOKEN || !SCOPE_ID || !DEVICE_ID) {
 } else {
   loadDeviceStatus();
   loadAppearanceSettings();
+  loadBackgroundImage();
   loadList();
 }
 </script>
