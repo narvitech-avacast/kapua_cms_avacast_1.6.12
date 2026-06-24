@@ -33,11 +33,15 @@ body{font-family:Roboto,'Segoe UI',sans-serif;font-size:13px;background:#f5f5f5;
 #device-sidebar h2{font-size:13px;font-weight:600;color:#555;padding:12px 14px 8px;border-bottom:1px solid #eee}
 #device-search{padding:8px 10px;border:none;border-bottom:1px solid #eee;font-size:12px;width:100%;outline:none}
 #device-list{flex:1;overflow-y:auto}
-.device-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px}
+.device-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px;display:flex;align-items:center;gap:6px}
 .device-item:hover{background:#f1f8ff}
 .device-item.active{background:#e8f0fe;color:#1a73e8;font-weight:600}
+.device-item .device-info{flex:1;min-width:0}
 .device-item .device-name{font-weight:500;margin-bottom:2px}
 .device-item .device-client{color:#888;font-size:11px}
+.device-item .device-del{opacity:0;transition:opacity .15s;padding:2px 7px;font-size:10px;flex-shrink:0;background:#ea4335;color:#fff;border:none;border-radius:3px;cursor:pointer}
+.device-item:hover .device-del{opacity:1}
+.device-item .device-del:hover{background:#c5221f}
 #device-loading{padding:16px;text-align:center;color:#888;font-size:12px}
 #device-empty{padding:16px;text-align:center;color:#aaa;font-size:12px}
 
@@ -403,9 +407,21 @@ function renderDeviceList(devices) {
   devices.forEach(d => {
     const el = document.createElement('div');
     el.className = 'device-item' + (d.id === DEVICE_ID ? ' active' : '');
-    el.innerHTML =
+
+    const info = document.createElement('div');
+    info.className = 'device-info';
+    info.innerHTML =
       '<div class="device-name">' + escHtml(d.displayName || d.clientId || d.id) + '</div>' +
       '<div class="device-client">' + escHtml(d.clientId || '') + '</div>';
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'device-del';
+    delBtn.textContent = '刪除';
+    delBtn.title = '清除 Signage 並刪除裝置';
+    delBtn.onclick = e => { e.stopPropagation(); deleteDevice(d); };
+
+    el.appendChild(info);
+    el.appendChild(delBtn);
     el.onclick = () => selectDevice(d);
     list.appendChild(el);
   });
@@ -430,6 +446,47 @@ function selectDevice(device) {
   loadDeviceStatus();
   loadBackgroundImage();
   loadList();
+}
+
+async function deleteDevice(device) {
+  const name = device.displayName || device.clientId || device.id;
+  if (!confirm('確定要刪除裝置「' + name + '」？\n將先清除裝置上所有 Signage 播放清單與背景圖片，再從 CMS 刪除裝置。\n此操作無法復原。')) return;
+  clearMsg();
+
+  const deviceBase = '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices/' + encodeURIComponent(device.id) + '/digitalsignage';
+
+  // Step 1: 清除 Signage（裝置離線時跳過，不阻擋刪除）
+  try {
+    const queryResp = await fetch(deviceBase + '/_query?timeout=10000', {method:'POST', headers:jsonHeaders(), body:'{}'});
+    if (queryResp.ok) {
+      const list = asArray(await queryResp.json());
+      for (const pl of list) {
+        await fetch(deviceBase + '/delete_playlist/' + encodeURIComponent(pl.id) + '?timeout=5000',
+          {method:'DELETE', headers:jsonHeaders()});
+      }
+    }
+  } catch (_) { /* 裝置離線，繼續刪除 */ }
+
+  // Step 2: 刪除裝置
+  try {
+    const delResp = await fetch(
+      '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices/' + encodeURIComponent(device.id),
+      {method:'DELETE', headers:jsonHeaders()}
+    );
+    if (!delResp.ok) {
+      const r = await readJson(delResp);
+      throw new Error('裝置刪除失敗 (HTTP ' + delResp.status + ')' + (r && r.message ? '：' + r.message : ''));
+    }
+    showMsg('裝置「' + escHtml(name) + '」已清除 Signage 並刪除。', 'success');
+    if (DEVICE_ID === device.id) {
+      DEVICE_ID = '';
+      document.getElementById('signage-placeholder').style.display = '';
+      document.getElementById('signage-content').style.display = 'none';
+    }
+    loadDevices();
+  } catch (e) {
+    showMsg(e.message, 'error');
+  }
 }
 
 // ── Everything below is the existing signage panel logic ─────────────────────
