@@ -148,6 +148,7 @@
       <button class="btn btn-primary" onclick="showCreate()">新增播放清單</button>
       <button class="btn btn-secondary" onclick="loadList()">重新整理</button>
       <span id="spinner" class="status">載入中...</span>
+      <button id="reset-btn" class="btn btn-danger" style="margin-left:auto" onclick="resetDevice()">清除裝置 Signage</button>
     </div>
     <div id="list-container"><div class="empty">載入中...</div></div>
   </div>
@@ -1100,6 +1101,41 @@ async function confirmDelete(id, name) {
     loadList();
   } catch (error) {
     showMsg(error.message, 'error');
+  }
+}
+
+async function resetDevice() {
+  if (!confirm('確定要清除此裝置上的所有播放清單與背景圖片，讓裝置回歸預設狀態？\n此操作無法復原。')) return;
+  const btn = document.getElementById('reset-btn');
+  btn.disabled = true;
+  clearMsg();
+  try {
+    const response = await fetch(BASE + '/_query?timeout=10000', {method:'POST', headers:JSON_HEADERS, body:'{}'});
+    if (!response.ok) throw new Error('查詢播放清單失敗 (HTTP ' + response.status + ')');
+    const list = asArray(await response.json());
+    if (!list.length) {
+      showMsg('裝置上沒有任何播放清單，已是預設狀態。', 'info');
+      return;
+    }
+    let failCount = 0;
+    for (const pl of list) {
+      const delResp = await fetch(
+        BASE + '/delete_playlist/' + encodeURIComponent(pl.id) + '?timeout=5000',
+        {method:'DELETE', headers:JSON_HEADERS}
+      );
+      if (!delResp.ok) failCount++;
+    }
+    if (failCount > 0) {
+      showMsg('已清除 ' + (list.length - failCount) + ' 筆，' + failCount + ' 筆刪除失敗（裝置可能離線）。', 'error');
+    } else {
+      showMsg('已清除全部 ' + list.length + ' 個播放清單，裝置已回歸預設狀態。', 'success');
+    }
+    loadBackgroundImage();
+    loadList();
+  } catch (error) {
+    showMsg('重置失敗：' + error.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 
