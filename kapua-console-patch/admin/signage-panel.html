@@ -595,7 +595,10 @@ async function setAsDefault(id) {
     );
     const result = await readJson(resp);
     if (!resp.ok) throw new Error(apiErrorMessage(resp, result, '設定預設播放失敗'));
-    showMsg('已設為預設播放清單。', 'success');
+    // 通知裝置立即切換
+    await fetch(BASE + '/play_playlist/' + encodeURIComponent(id) + '?timeout=5000',
+      {method:'POST', headers:JSON_HEADERS, body:'{}'});
+    showMsg('已設為預設播放清單並傳送到裝置。', 'success');
     loadList();
   } catch (error) {
     showMsg(error.message, 'error');
@@ -1066,12 +1069,19 @@ async function savePlaylist() {
       body: JSON.stringify(body)
     });
     const result = await readJson(response);
-    if (response.ok && result && result.controlTimeout) {
+    if (!response.ok) throw new Error(apiErrorMessage(response, result, '儲存失敗'));
+    // 若設為預設播放，儲存後立即通知裝置切換
+    if (!schedule.enable) {
+      const savedId = editingId || (result && result.id);
+      if (savedId) {
+        await fetch(BASE + '/play_playlist/' + encodeURIComponent(savedId) + '?timeout=5000',
+          {method:'POST', headers:JSON_HEADERS, body:'{}'});
+      }
+    }
+    if (result && result.controlTimeout) {
       showMsg(controlTimeoutMessage('已儲存至伺服器'), 'info');
-    } else if (response.ok) {
-      showMsg('已儲存並傳送到裝置播放。', 'success');
     } else {
-      throw new Error(apiErrorMessage(response, result, '儲存失敗'));
+      showMsg('已儲存並傳送到裝置播放。', 'success');
     }
     showList();
     loadList();
