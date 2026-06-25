@@ -154,6 +154,7 @@ public class DeviceLifeCycleServiceImpl implements DeviceLifeCycleService {
         } catch (Throwable e) {
             LOG.warn("BIRTH/Reply error ({}) for clientId={}: {}", e.getClass().getName(), birthChannel.getClientId(), e.getMessage(), e);
         }
+        triggerDeviceInitAsync(scopeId, deviceId);
     }
 
     private static synchronized String getOrRefreshJwt() {
@@ -219,6 +220,38 @@ public class DeviceLifeCycleServiceImpl implements DeviceLifeCycleService {
         } catch (Throwable e) {
             LOG.warn("Failed to publish BIRTH/Reply ({}) to topic={}: {}", e.getClass().getName(), topic, e.getMessage(), e);
         }
+    }
+
+    private static void triggerDeviceInitAsync(KapuaId scopeId, KapuaId deviceId) {
+        final String scopeCompact = scopeId.toCompactId();
+        final String deviceCompact = deviceId.toCompactId();
+        Thread t = new Thread(() -> {
+            try { Thread.sleep(3000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            try {
+                String jwt = getOrRefreshJwt();
+                if (jwt == null) {
+                    LOG.warn("Device init: no JWT available for scopeId={} deviceId={}", scopeCompact, deviceCompact);
+                    return;
+                }
+                URL url = new URL(KAPUA_API_URL + "/v1/" + scopeCompact
+                        + "/devices/" + deviceCompact + "/digitalsignage/_init_device");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Authorization", "Bearer " + jwt);
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(30000);
+                int code = conn.getResponseCode();
+                LOG.info("Device init on first birth scopeId={} deviceId={} HTTP={}",
+                        scopeCompact, deviceCompact, code);
+                conn.disconnect();
+            } catch (Exception e) {
+                LOG.warn("Failed to trigger device init for scopeId={} deviceId={}: {}",
+                        scopeCompact, deviceCompact, e.getMessage());
+            }
+        }, "signage-init-" + deviceCompact);
+        t.setDaemon(true);
+        t.start();
     }
 
     @Override

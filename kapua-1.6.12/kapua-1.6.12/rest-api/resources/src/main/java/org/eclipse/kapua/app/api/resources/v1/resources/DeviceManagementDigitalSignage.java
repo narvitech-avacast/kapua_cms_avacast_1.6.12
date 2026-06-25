@@ -73,15 +73,18 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Path("{scopeId}/devices/{deviceId}/digitalsignage")
 public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
 
     private static final String PLAYLIST_TABLE = "signage_playlist_custom";
+    private static final String DEVICE_INIT_SENTINEL_PREFIX = "CINIT$";
     private static final String PLAYLIST_METRIC = "ds.playlist";
     private static final long MAX_IMAGE_SIZE = 20L * 1024L * 1024L;
     private static final long DEFAULT_DEVICE_TIMEOUT = 5000L;
@@ -366,6 +369,63 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
                 .type(MediaType.APPLICATION_JSON)
                 .entity(toJson(body))
                 .build();
+    }
+
+    /**
+     * Initialize a device on its very first connection: delete all existing playlists from DB and
+     * notify the device to clear them. Subsequent calls are no-ops (sentinel row guards idempotency).
+     */
+    @POST
+    @Path("_init_device")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response initDevice(
+            @PathParam("scopeId") ScopeId scopeId,
+            @PathParam("deviceId") EntityId deviceId) throws KapuaException {
+        checkPermission(scopeId, Actions.write);
+        checkPermission(scopeId, Actions.execute);
+
+        String deviceCompact = deviceId.toCompactId();
+        String sentinelId = DEVICE_INIT_SENTINEL_PREFIX + deviceCompact;
+
+        if (loadPlaylist(scopeId, deviceId, sentinelId) != null) {
+            LOGGER.info("Device init skipped (already initialized) scopeId={} deviceId={}",
+                    scopeId.toCompactId(), deviceCompact);
+            return Response.ok(toJson(Json.createObjectBuilder()
+                    .add("initialized", true)
+                    .add("action", "skipped")
+                    .build()), MediaType.APPLICATION_JSON).build();
+        }
+
+        List<String[]> playlists = loadAllPlaylistIdsAndPayloads(scopeId, deviceId);
+        int deleted = 0, failed = 0;
+        for (String[] entry : playlists) {
+            String playlistId = entry[0];
+            String payload = entry[1];
+            try {
+                forward(scopeId, deviceId, DEFAULT_DEVICE_TIMEOUT, payload, "delete_playList");
+            } catch (Exception e) {
+                failed++;
+                LOGGER.warn("Device init: MQTT delete failed for playlistId={}: {}", playlistId, e.getMessage());
+            }
+            try {
+                deletePlaylistRecord(scopeId, playlistId);
+                deleted++;
+            } catch (Exception e) {
+                failed++;
+                LOGGER.warn("Device init: DB delete failed for playlistId={}: {}", playlistId, e.getMessage());
+            }
+        }
+
+        savePlaylist(scopeId, deviceId, sentinelId, "{\"sentinel\":true}", "INITIALIZED", null);
+        LOGGER.info("Device init complete scopeId={} deviceId={} deleted={} failed={}",
+                scopeId.toCompactId(), deviceCompact, deleted, failed);
+
+        return Response.ok(toJson(Json.createObjectBuilder()
+                .add("initialized", true)
+                .add("action", "reset")
+                .add("deleted", deleted)
+                .add("failed", failed)
+                .build()), MediaType.APPLICATION_JSON).build();
     }
 
     /** Delete playlist: remove from DB then notify device. */
@@ -940,6 +1000,9 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
                 ps.setInt(4, offset);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
+                        if (rs.getString(1).startsWith(DEVICE_INIT_SENTINEL_PREFIX)) {
+                            continue;
+                        }
                         try (JsonReader r = Json.createReader(new StringReader(rs.getString(2)))) {
                             JsonObject payload = r.readObject();
                             JsonObjectBuilder item = Json.createObjectBuilder();
@@ -961,6 +1024,31 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
         } catch (SQLException | RuntimeException e) {
             throw KapuaException.internalError(e, "Unable to load Signage playlists");
         }
+    }
+
+    private List<String[]> loadAllPlaylistIdsAndPayloads(ScopeId scopeId, EntityId deviceId)
+            throws KapuaException {
+        List<String[]> result = new ArrayList<String[]>();
+        String sql = "SELECT playlist_id, payload FROM " + PLAYLIST_TABLE
+                + " WHERE scope_id = ? AND device_id = ?";
+        try (Connection conn = openConnection()) {
+            ensurePlaylistTable(conn);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, scopeId.toCompactId());
+                ps.setString(2, deviceId.toCompactId());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String pid = rs.getString(1);
+                        if (!pid.startsWith(DEVICE_INIT_SENTINEL_PREFIX)) {
+                            result.add(new String[]{pid, rs.getString(2)});
+                        }
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            throw KapuaException.internalError(e, "Unable to load Signage playlists for init");
+        }
+        return result;
     }
 
     private String loadPlaylist(ScopeId scopeId, EntityId deviceId, String playlistId)
