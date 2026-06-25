@@ -49,12 +49,15 @@ import org.eclipse.kapua.app.console.module.device.shared.service.GwtDeviceServi
 import org.eclipse.kapua.app.console.module.device.shared.service.GwtDeviceServiceAsync;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class DeviceGrid extends EntityGrid<GwtDevice> {
 
     private GwtDeviceQuery query;
     private DeviceGridToolbar toolbar;
+    private final Map<String, String[]> wifiCache = new HashMap<String, String[]>();
 
     private static final GwtDeviceServiceAsync GWT_DEVICE_SERVICE = GWT.create(GwtDeviceService.class);
     private static final GwtDeviceManagementServiceAsync GWT_DEVICE_MANAGEMENT_SERVICE = GWT.create(GwtDeviceManagementService.class);
@@ -246,15 +249,19 @@ public class DeviceGrid extends EntityGrid<GwtDevice> {
 
                     @Override
                     public void onFailure(Throwable caught) {
-                        device.setWifiSSID("");
-                        device.setWifiSignal("");
-                        device.setHotSpotStatus("");
-                        entityStore.update(device);
+                        String[] cached = wifiCache.get(device.getId());
+                        if (cached != null) {
+                            device.setWifiSSID(cached[0]);
+                            device.setWifiSignal(cached[1]);
+                            device.setHotSpotStatus(cached[2]);
+                            entityStore.update(device);
+                        }
                     }
 
                     @Override
                     public void onSuccess(List<GwtConfigComponent> components) {
                         applyNetworkConfiguration(device, components);
+                        wifiCache.put(device.getId(), new String[]{device.getWifiSSID(), device.getWifiSignal(), device.getHotSpotStatus()});
                         entityStore.update(device);
                     }
                 });

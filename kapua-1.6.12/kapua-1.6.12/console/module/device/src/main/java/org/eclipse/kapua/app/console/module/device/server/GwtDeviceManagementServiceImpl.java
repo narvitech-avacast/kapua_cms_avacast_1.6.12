@@ -78,11 +78,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.xml.namespace.QName;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -97,6 +100,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.StringTokenizer;
+import java.util.concurrent.ConcurrentHashMap;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
 /**
  * The server side implementation of the Device RPC service.
@@ -125,6 +133,8 @@ public class GwtDeviceManagementServiceImpl extends KapuaRemoteServiceServlet im
     private static final DevicePackageFactory DEVICE_PACKAGE_FACTORY = LOCATOR.getFactory(DevicePackageFactory.class);
 
     private static final DeviceSnapshotManagementService SNAPSHOT_MANAGEMENT_SERVICE = LOCATOR.getService(DeviceSnapshotManagementService.class);
+
+    private static final ConcurrentHashMap<String, List<GwtConfigComponent>> CONFIG_CACHE = new ConcurrentHashMap<String, List<GwtConfigComponent>>();
 
     //
     // Packages
@@ -388,7 +398,26 @@ public class GwtDeviceManagementServiceImpl extends KapuaRemoteServiceServlet im
                     }
                 }
             }
+            CONFIG_CACHE.put(device.getId(), gwtConfigs);
         } catch (Throwable t) {
+            // Try ESF 2.0 fallback: extract XML from the exception chain and parse directly
+            String esfXml = extractEsfXmlFromException(t);
+            if (esfXml != null) {
+                try {
+                    List<GwtConfigComponent> esfConfigs = parseEsfXml(esfXml);
+                    if (!esfConfigs.isEmpty()) {
+                        CONFIG_CACHE.put(device.getId(), esfConfigs);
+                        return esfConfigs;
+                    }
+                } catch (Exception parseEx) {
+                    LOG.warn("ESF XML parse failed for device {}: {}", device.getId(), parseEx.getMessage());
+                }
+            }
+            List<GwtConfigComponent> cached = CONFIG_CACHE.get(device.getId());
+            if (cached != null) {
+                LOG.warn("findDeviceConfigurations failed for device {}, returning cached result. Error: {}", device.getId(), t.getMessage());
+                return cached;
+            }
             throw KapuaExceptionHandler.buildExceptionFromError(t);
         }
         return gwtConfigs;
@@ -915,6 +944,80 @@ public class GwtDeviceManagementServiceImpl extends KapuaRemoteServiceServlet im
         }
         //
         // If not, all is fine.
+    }
+
+    private static String extractEsfXmlFromException(Throwable t) {
+        Throwable cause = t;
+        int depth = 0;
+        while (cause != null && depth < 20) {
+            if ("InvalidBodyContentException".equals(cause.getClass().getSimpleName())) {
+                try {
+                    java.lang.reflect.Method m = cause.getClass().getMethod("getBodyString");
+                    Object result = m.invoke(cause);
+                    if (result instanceof String) {
+                        return (String) result;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            cause = cause.getCause();
+            depth++;
+        }
+        return null;
+    }
+
+    private static List<GwtConfigComponent> parseEsfXml(String xml) throws Exception {
+        List<GwtConfigComponent> result = new ArrayList<GwtConfigComponent>();
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setNamespaceAware(true);
+        dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        DocumentBuilder db = dbf.newDocumentBuilder();
+        Document doc = db.parse(new InputSource(new StringReader(xml)));
+
+        String esfNs = "http://eurotech.com/esf/2.0";
+        NodeList configNodes = doc.getElementsByTagNameNS(esfNs, "configuration");
+        for (int i = 0; i < configNodes.getLength(); i++) {
+            Element configEl = (Element) configNodes.item(i);
+            String pid = configEl.getAttribute("pid");
+            if (pid == null || pid.isEmpty()) {
+                continue;
+            }
+
+            GwtConfigComponent gwtConfig = new GwtConfigComponent();
+            gwtConfig.setId(pid);
+            gwtConfig.setName(pid.contains(".") ? pid.substring(pid.lastIndexOf('.') + 1) : pid);
+
+            List<GwtConfigParameter> params = new ArrayList<GwtConfigParameter>();
+            NodeList propNodes = configEl.getElementsByTagNameNS(esfNs, "property");
+            for (int j = 0; j < propNodes.getLength(); j++) {
+                Element propEl = (Element) propNodes.item(j);
+                String name = propEl.getAttribute("name");
+                if (name == null || name.isEmpty()) {
+                    continue;
+                }
+                boolean array = Boolean.parseBoolean(propEl.getAttribute("array"));
+
+                GwtConfigParameter param = new GwtConfigParameter();
+                param.setId(name);
+                param.setName(name);
+
+                NodeList valueNodes = propEl.getElementsByTagNameNS(esfNs, "value");
+                if (array) {
+                    String[] values = new String[valueNodes.getLength()];
+                    for (int k = 0; k < valueNodes.getLength(); k++) {
+                        values[k] = valueNodes.item(k).getTextContent();
+                    }
+                    param.setValues(values);
+                } else if (valueNodes.getLength() > 0) {
+                    param.setValue(valueNodes.item(0).getTextContent());
+                }
+
+                params.add(param);
+            }
+            gwtConfig.setParameters(params);
+            result.add(gwtConfig);
+        }
+        return result;
     }
 
 }
