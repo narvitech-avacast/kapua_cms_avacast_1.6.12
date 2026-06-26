@@ -26,13 +26,28 @@ final class SignageScheduleNormalizer {
 
     static JsonObject normalize(JsonObject source) {
         JsonObject schedule = scheduleObject(source);
+        boolean enable = readBoolean(schedule, "enable", false);
+        String startDate = readString(schedule, "startDate");
+        String endDate   = readString(schedule, "endDate");
+        String startTime = readString(schedule, "startTime");
+        String endTime   = readString(schedule, "endTime");
+
+        // When schedule is enabled but date fields are empty, fill wide-open defaults
+        // so the device DateFormat.parse() succeeds (empty/null strings throw ParseException).
+        if (enable) {
+            if (startDate.isEmpty()) startDate = "2000-01-01";
+            if (startTime.isEmpty()) startTime = "00:00:00";
+            if (endDate.isEmpty())   endDate   = "2099-12-31";
+            if (endTime.isEmpty())   endTime   = "23:59:59";
+        }
+
         JsonObjectBuilder builder = Json.createObjectBuilder()
-                .add("startDate", readString(schedule, "startDate"))
-                .add("endDate", readString(schedule, "endDate"))
-                .add("startTime", readString(schedule, "startTime"))
-                .add("endTime", readString(schedule, "endTime"))
+                .add("startDate", startDate)
+                .add("endDate",   endDate)
+                .add("startTime", startTime)
+                .add("endTime",   endTime)
                 .add("weekdays", readWeekdays(schedule))
-                .add("enable", readBoolean(schedule, "enable", false));
+                .add("enable", enable);
 
         if (schedule != null) {
             for (Map.Entry<String, JsonValue> entry : schedule.entrySet()) {

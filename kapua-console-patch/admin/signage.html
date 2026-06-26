@@ -455,16 +455,9 @@ async function deleteDevice(device) {
 
   const deviceBase = '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices/' + encodeURIComponent(device.id) + '/digitalsignage';
 
-  // Step 1: 清除 Signage（裝置離線時跳過，不阻擋刪除）
+  // Step 1: 清除 Signage（含孤兒舊播放清單；裝置離線時仍清 DB，不阻擋刪除）
   try {
-    const queryResp = await fetch(deviceBase + '/_query?timeout=10000', {method:'POST', headers:jsonHeaders(), body:'{}'});
-    if (queryResp.ok) {
-      const list = asArray(await queryResp.json());
-      for (const pl of list) {
-        await fetch(deviceBase + '/delete_playlist/' + encodeURIComponent(pl.id) + '?timeout=5000',
-          {method:'DELETE', headers:jsonHeaders()});
-      }
-    }
+    await fetch(deviceBase + '/_clear_device?timeout=5000', {method:'POST', headers:jsonHeaders()});
   } catch (_) { /* 裝置離線，繼續刪除 */ }
 
   // Step 2: 刪除裝置
@@ -1172,22 +1165,17 @@ async function resetDevice() {
   btn.disabled = true;
   clearMsg();
   try {
-    const response = await fetch(BASE() + '/_query?timeout=10000', {method:'POST', headers:jsonHeaders(), body:'{}'});
-    if (!response.ok) throw new Error('查詢播放清單失敗 (HTTP ' + response.status + ')');
-    const list = asArray(await response.json());
-    if (!list.length) { showMsg('裝置上沒有任何播放清單，已是預設狀態。', 'info'); return; }
-    let failCount = 0;
-    for (const pl of list) {
-      const delResp = await fetch(
-        BASE() + '/delete_playlist/' + encodeURIComponent(pl.id) + '?timeout=5000',
-        {method:'DELETE', headers:jsonHeaders()}
-      );
-      if (!delResp.ok) failCount++;
-    }
-    if (failCount > 0) {
-      showMsg('已清除 ' + (list.length - failCount) + ' 筆，' + failCount + ' 筆刪除失敗（裝置可能離線）。', 'error');
+    const resp = await fetch(BASE() + '/_clear_device?timeout=5000', {method:'POST', headers:jsonHeaders()});
+    const result = await readJson(resp);
+    if (!resp.ok) throw new Error(apiErrorMessage(resp, result, '清除失敗'));
+    const sent = (result && result.mqttSent) || 0;
+    const failed = (result && result.mqttFailed) || 0;
+    if (sent === 0 && failed === 0) {
+      showMsg('裝置上沒有任何播放清單，已是預設狀態。', 'info');
+    } else if (failed > 0) {
+      showMsg('已清除 DB 記錄，共 ' + failed + ' 筆 MQTT 通知失敗（裝置可能離線，本地快取將在下次連線時清除）。', 'info');
     } else {
-      showMsg('已清除全部 ' + list.length + ' 個播放清單，裝置已回歸預設狀態。', 'success');
+      showMsg('已清除全部 ' + sent + ' 個播放清單，裝置已回歸預設狀態。', 'success');
     }
     loadBackgroundImage();
     loadList();

@@ -398,7 +398,14 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
 
         List<String[]> playlists = loadAllPlaylistIdsAndPayloads(scopeId, deviceId);
         int deleted = 0, failed = 0;
-        for (String[] entry : playlists) {
+
+        // For a re-registered device (empty DB for new deviceId), also send delete_playList
+        // for all scope-level playlists so orphaned local files on the device are cleared.
+        List<String[]> mqttDeletes = playlists.isEmpty()
+                ? loadAllScopePlaylistIdsAndPayloads(scopeId)
+                : playlists;
+
+        for (String[] entry : mqttDeletes) {
             String playlistId = entry[0];
             String payload = entry[1];
             try {
@@ -407,12 +414,16 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
                 failed++;
                 LOGGER.warn("Device init: MQTT delete failed for playlistId={}: {}", playlistId, e.getMessage());
             }
+        }
+
+        // DB cleanup: only remove records that belong to this specific device.
+        for (String[] entry : playlists) {
             try {
-                deletePlaylistRecord(scopeId, playlistId);
+                deletePlaylistRecord(scopeId, entry[0]);
                 deleted++;
             } catch (Exception e) {
                 failed++;
-                LOGGER.warn("Device init: DB delete failed for playlistId={}: {}", playlistId, e.getMessage());
+                LOGGER.warn("Device init: DB delete failed for playlistId={}: {}", entry[0], e.getMessage());
             }
         }
 
@@ -425,6 +436,66 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
                 .add("action", "reset")
                 .add("deleted", deleted)
                 .add("failed", failed)
+                .build()), MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * Clear all playlists from the device and DB.
+     * Follows the delete-playlist-migration pattern: send MQTT delete_playList first,
+     * then remove from DB. Covers all scope playlists (regardless of which deviceId they
+     * were last pushed to) so orphaned local files on re-registered devices are also cleared.
+     * Resets the _init_device sentinel so it can run again on next connect.
+     */
+    @POST
+    @Path("_clear_device")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response clearDevice(
+            @PathParam("scopeId") ScopeId scopeId,
+            @PathParam("deviceId") EntityId deviceId,
+            @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
+        checkPermission(scopeId, Actions.write);
+        checkPermission(scopeId, Actions.execute);
+
+        List<String[]> allPlaylists = loadAllScopePlaylistIdsAndPayloads(scopeId);
+        int mqttSent = 0, mqttFailed = 0, dbDeleted = 0, dbFailed = 0;
+
+        for (String[] entry : allPlaylists) {
+            String playlistId = entry[0];
+            String payload = entry[1];
+            // Step 1 (per migration): send delete_playList to device FIRST
+            try {
+                forward(scopeId, deviceId, timeout, payload, "delete_playList");
+                mqttSent++;
+            } catch (Exception e) {
+                mqttFailed++;
+                LOGGER.warn("Clear device: MQTT delete failed for playlistId={}: {}", playlistId, e.getMessage());
+            }
+            // Step 2 (per migration): delete from DB regardless (stale records must be cleaned)
+            try {
+                deletePlaylistRecord(scopeId, playlistId);
+                dbDeleted++;
+            } catch (Exception e) {
+                dbFailed++;
+                LOGGER.warn("Clear device: DB delete failed for playlistId={}: {}", playlistId, e.getMessage());
+            }
+        }
+
+        // Reset sentinel so _init_device can run again on next device connect
+        try {
+            deletePlaylistRecord(scopeId, DEVICE_INIT_SENTINEL_PREFIX + deviceId.toCompactId());
+        } catch (Exception e) {
+            LOGGER.warn("Clear device: sentinel reset failed: {}", e.getMessage());
+        }
+
+        LOGGER.info("Clear device complete scopeId={} deviceId={} mqttSent={} mqttFailed={} dbDeleted={} dbFailed={}",
+                scopeId.toCompactId(), deviceId.toCompactId(), mqttSent, mqttFailed, dbDeleted, dbFailed);
+
+        return Response.ok(toJson(Json.createObjectBuilder()
+                .add("cleared", true)
+                .add("mqttSent", mqttSent)
+                .add("mqttFailed", mqttFailed)
+                .add("dbDeleted", dbDeleted)
+                .add("dbFailed", dbFailed)
                 .build()), MediaType.APPLICATION_JSON).build();
     }
 
@@ -1024,6 +1095,30 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
         } catch (SQLException | RuntimeException e) {
             throw KapuaException.internalError(e, "Unable to load Signage playlists");
         }
+    }
+
+    private List<String[]> loadAllScopePlaylistIdsAndPayloads(ScopeId scopeId)
+            throws KapuaException {
+        List<String[]> result = new ArrayList<String[]>();
+        String sql = "SELECT DISTINCT playlist_id, payload FROM " + PLAYLIST_TABLE
+                + " WHERE scope_id = ?";
+        try (Connection conn = openConnection()) {
+            ensurePlaylistTable(conn);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, scopeId.toCompactId());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String pid = rs.getString(1);
+                        if (!pid.startsWith(DEVICE_INIT_SENTINEL_PREFIX)) {
+                            result.add(new String[]{pid, rs.getString(2)});
+                        }
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            throw KapuaException.internalError(e, "Unable to load scope-wide Signage playlists for init");
+        }
+        return result;
     }
 
     private List<String[]> loadAllPlaylistIdsAndPayloads(ScopeId scopeId, EntityId deviceId)
