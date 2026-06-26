@@ -499,7 +499,11 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
                 .build()), MediaType.APPLICATION_JSON).build();
     }
 
-    /** Delete playlist: remove from DB then notify device. */
+    /**
+     * Delete playlist: notify device FIRST, then remove from DB (per delete-playlist-migration).
+     * If device is offline or times out, the record is kept as PENDING_DELETE so that
+     * _clear_device can retry delivery when the device is online.
+     */
     @DELETE
     @Path("delete_playlist/{playlistId}")
     @Produces(MediaType.APPLICATION_JSON)
@@ -523,13 +527,14 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
         try {
             Response response = deliverPlaylist(
                     scopeId, deviceId, playlistId, timeout, dbPayload, "delete_playList");
+            // Step 2 (per migration): delete DB only after device confirms
             deletePlaylistRecord(scopeId, playlistId);
             return response;
         } catch (DeviceNotConnectedException e) {
-            deletePlaylistRecord(scopeId, playlistId);
+            // Keep PENDING_DELETE record — _clear_device will retry when device is online
             return deliveryPendingResponse(playlistId, "deleted", "DEVICE_OFFLINE", e);
         } catch (DeviceManagementTimeoutException e) {
-            deletePlaylistRecord(scopeId, playlistId);
+            // Keep PENDING_DELETE record — _clear_device will retry when device is online
             return deliveryPendingResponse(playlistId, "deleted", "DELIVERY_TIMEOUT", e);
         }
     }
@@ -1061,6 +1066,7 @@ public class DeviceManagementDigitalSignage extends AbstractKapuaResource {
         String sql = "SELECT playlist_id, payload, delivery_status, last_error FROM "
                 + PLAYLIST_TABLE
                 + " WHERE scope_id = ? AND device_id = ?"
+                + " AND delivery_status != 'PENDING_DELETE'"
                 + " ORDER BY updated_on DESC LIMIT ? OFFSET ?";
         try (Connection conn = openConnection()) {
             ensurePlaylistTable(conn);
