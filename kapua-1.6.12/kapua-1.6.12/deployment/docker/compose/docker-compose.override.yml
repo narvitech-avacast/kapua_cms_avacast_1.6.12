@@ -63,6 +63,9 @@ services:
       - "127.0.0.1:8081:8081"
       - "127.0.0.1:8082:8082"
       - "127.0.0.1:8444:8444"
+    networks:
+      default:
+        ipv4_address: 172.19.0.100
     environment:
       - PROBE_PORTS=8081,8082,8444
       - MQTT_HOST=broker
@@ -73,3 +76,11 @@ services:
     depends_on:
       - broker
     restart: unless-stopped
+
+networks:
+  default:
+    # Reference the existing network; Docker Compose won't try to recreate it.
+    # For fresh deployments create it first:
+    #   docker network create --subnet=172.19.0.0/16 --gateway=172.19.0.1 compose_default
+    external: true
+    name: compose_default
