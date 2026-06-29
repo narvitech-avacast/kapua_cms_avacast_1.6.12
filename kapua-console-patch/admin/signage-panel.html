@@ -221,14 +221,17 @@
 </div>
 
 <script>
+// When opened directly via kapua-console port (8083/8445), redirect to nginx so
+// all API calls are same-origin and no CORS headers are needed.
+if (['8083', '8445'].includes(location.port)) {
+  location.replace('https://' + location.hostname + location.pathname + location.hash);
+}
+
 const parts = location.hash.replace('#','').split('/');
 const TOKEN = parts[0] || '';
 const SCOPE_ID = parts[1] || '';
 const DEVICE_ID = parts[2] || '';
-// Port 8083/8445 is kapua-console direct; API lives behind nginx on port 443.
-const API_ORIGIN = ['8083','8445'].includes(location.port)
-  ? 'https://' + location.hostname
-  : location.origin;
+const API_ORIGIN = location.origin;
 const BASE = `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/digitalsignage`;
 const APPEARANCE_CONFIG_ID = 'com.PeerInternet.Appearance.Config';
 const APPEARANCE_BASE =
