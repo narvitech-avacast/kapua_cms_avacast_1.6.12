@@ -6,6 +6,18 @@ services:
   broker:
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-broker-patch
     image: kapua/kapua-broker:1.6.12-patched
+    # !override replaces the base ports list entirely — removes plain MQTT 1883.
+    # Internal containers (debug-proxy) still reach broker:1883 via Docker network.
+    ports: !override
+      - "8883:8883"
+      - "52614:61614"
+    expose:
+      - "1893"
+    environment:
+      - KAPUA_DISABLE_SSL=false
+      - KAPUA_KEYSTORE_PASSWORD=kapua-broker-ssl
+    volumes:
+      - d:/kapua_0609/kapua_cms_avacast_1.6.12/nginx/certs/kapua-broker.jks:/var/opt/activemq/tls/kapua.jks:ro
 
   kapua-api:
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-api-patch
@@ -14,6 +26,8 @@ services:
       - API_CORS_ORIGINS_ALLOWED=http://localhost:8083,http://172.16.19.37:8083,https://localhost:8445,https://172.16.19.37:8445
       - SIGNAGE_MEDIA_STORAGE_ROOT=/var/lib/kapua-signage
       - SIGNAGE_MEDIA_PUBLIC_BASE_URL=https://172.16.19.37
+      # Override broker scheme/port so newly registered devices receive MQTTS config
+      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dbroker.scheme=ssl -Dbroker.port=8883 -Dbroker.mqtt.password=kapua-password -Dsso.openid.provider=generic -Dsso.openid.client.id=${KAPUA_OPENID_CLIENT_ID} -Dsso.openid.client.secret=${KAPUA_OPENID_CLIENT_SECRET} -Dsso.openid.generic.jwt.issuer.allowed=https://accounts.google.com -Dsso.openid.generic.jwt.audience.allowed=${KAPUA_OPENID_JWT_AUDIENCE} -Dsso.openid.generic.server.endpoint.auth=https://accounts.google.com/o/oauth2/v2/auth -Dsso.openid.generic.server.endpoint.token=https://oauth2.googleapis.com/token -Dsso.openid.generic.server.endpoint.userinfo=https://www.googleapis.com/oauth2/v3/userinfo -Dsso.openid.claims.externalUsername.key=email
     volumes:
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/jetty/http-forwarded.ini:/var/opt/jetty/start.d/http-forwarded.ini:ro
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/file-repo-data:/var/lib/kapua-signage
@@ -44,14 +58,15 @@ services:
     container_name: debug-proxy
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/debug-proxy
     ports:
-      - "9999:9999"
-      - "8081:8081"
-      - "8082:8082"
-      - "8444:8444"
+      # Bind to 127.0.0.1 only — debug UI must not be reachable from external IPs
+      - "127.0.0.1:9999:9999"
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8082:8082"
+      - "127.0.0.1:8444:8444"
     environment:
       - PROBE_PORTS=8081,8082,8444
       - MQTT_HOST=broker
-      - MQTT_PORT=1883
+      - MQTT_PORT=1883   # internal Docker network — not affected by host port removal
       - MQTT_USER=${MQTT_DEBUG_USER:-kapua-broker}
       - MQTT_PASS=${MQTT_DEBUG_PASS:-kapua-password}
       - MQTT_TOPICS=${MQTT_DEBUG_TOPICS:-#}
