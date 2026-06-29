@@ -30,7 +30,7 @@ body{font-family:Roboto,'Segoe UI',sans-serif;font-size:13px;background:#f5f5f5;
 /* ── Main layout ── */
 #view-main{flex:1;display:none;overflow:hidden;flex-direction:row}
 #device-sidebar{width:260px;background:#fff;border-right:1px solid #e0e0e0;display:flex;flex-direction:column;flex-shrink:0}
-#device-sidebar h2{font-size:13px;font-weight:600;color:#555;padding:12px 14px 8px;border-bottom:1px solid #eee}
+#device-sidebar h2{font-size:13px;font-weight:600;color:#555}
 #device-search{padding:8px 10px;border:none;border-bottom:1px solid #eee;font-size:12px;width:100%;outline:none}
 #device-list{flex:1;overflow-y:auto}
 .device-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px;display:flex;align-items:center;gap:6px}
@@ -146,7 +146,10 @@ input:focus,select:focus{border-color:#1a73e8;outline:none;box-shadow:0 0 0 2px 
 <div id="view-main">
   <!-- Device sidebar -->
   <div id="device-sidebar">
-    <h2>裝置列表</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 8px;border-bottom:1px solid #eee">
+      <span style="font-size:13px;font-weight:600;color:#555">裝置列表</span>
+      <button onclick="loadDeviceList()" title="重新整理裝置列表" style="background:none;border:none;cursor:pointer;font-size:14px;color:#555;padding:0 2px;line-height:1">↻</button>
+    </div>
     <input type="text" id="device-search" placeholder="搜尋裝置名稱…" oninput="filterDevices()">
     <div id="device-list">
       <div id="device-loading">載入中…</div>
@@ -377,15 +380,24 @@ async function loadDeviceList() {
   document.getElementById('device-loading').style.display = 'block';
   document.getElementById('device-empty') && (document.getElementById('device-empty').remove());
   try {
-    const resp = await fetch(
-      '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices?limit=200',
-      { headers: jsonHeaders() }
-    );
+    const url = '/v1/' + encodeURIComponent(SCOPE_ID) + '/devices?limit=200';
+    console.log('[devices] fetch', url);
+    const resp = await fetch(url, { headers: jsonHeaders() });
     const data = await resp.json().catch(() => ({}));
-    allDevices = (data.device || data.items || data.devices || []);
+    console.log('[devices] status=' + resp.status, data);
+    if (!resp.ok) {
+      const msg = data.message || data.error || ('HTTP ' + resp.status);
+      document.getElementById('device-loading').textContent = '載入失敗（' + resp.status + '）：' + msg;
+      return;
+    }
+    // Kapua MOXy JSON: items may be plain array or {item:[...]}
+    const raw = data.items || data.device || data.devices || [];
+    allDevices = Array.isArray(raw) ? raw : (Array.isArray(raw.item) ? raw.item : []);
+    console.log('[devices] count=' + allDevices.length, 'scopeId=' + SCOPE_ID);
     renderDeviceList(allDevices);
   } catch (e) {
     document.getElementById('device-loading').textContent = '載入失敗：' + e.message;
+    console.error('[devices] error', e);
   }
 }
 
@@ -476,7 +488,7 @@ async function deleteDevice(device) {
       document.getElementById('signage-placeholder').style.display = '';
       document.getElementById('signage-content').style.display = 'none';
     }
-    loadDevices();
+    loadDeviceList();
   } catch (e) {
     showMsg(e.message, 'error');
   }

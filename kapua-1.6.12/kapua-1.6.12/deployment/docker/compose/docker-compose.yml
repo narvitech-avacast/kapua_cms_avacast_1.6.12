@@ -67,7 +67,7 @@ services:
       - KAPUA_KEYSTORE
       - KAPUA_KEYSTORE_PASSWORD
       - LOGBACK_LOG_LEVEL
-      - KAPUA_CONSOLE_URL=https://localhost
+      - KAPUA_CONSOLE_URL=http://localhost:8083
       - KAPUA_OPENID_JWT_ISSUER=https://accounts.google.com
       - KAPUA_OPENID_CLIENT_ID
       - KAPUA_OPENID_CLIENT_SECRET
@@ -76,7 +76,7 @@ services:
       - KAPUA_OPENID_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token
       - KAPUA_OPENID_LOGOUT_ENDPOINT=https://oauth2.googleapis.com/revoke
       - KAPUA_OPENID_USERINFO_ENDPOINT=https://www.googleapis.com/oauth2/v3/userinfo
-      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dconsole.sso.openid.user.logout.enabled=false -Dsso.openid.claims.externalUsername.key=email -Dauto.registration.simple.accountExpirationDate.days=0 -Dauto.registration.simple.maximumNumberOfChildUsers=2
+      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dconsole.sso.openid.user.logout.enabled=false -Dsso.openid.claims.externalUsername.key=email -Dauto.registration.simple.accountExpirationDate.days=0 -Dauto.registration.simple.maximumNumberOfChildUsers=2 -Dconsole.sso.openid.redirect.uri=https://localhost/openid/callback
   kapua-api:
     container_name: kapua-api
     image: kapua/kapua-api:${IMAGE_VERSION}
