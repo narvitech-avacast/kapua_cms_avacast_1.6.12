@@ -59,80 +59,90 @@
     </head>
     <body>
     <script>
-    /* Auto-refresh every 3 s with no visible flicker.
-       Strategy: snapshot grid rows as a fixed overlay before reload;
-       hide GXT's white loading mask via CSS; fade out overlay when done. */
+    /* Incremental cell-only live update every 3 s.
+       Polls /device-live-status.jsp for Status, Network/SSID, IP, AP, Signal;
+       updates ONLY the changed cells in-place — no full grid reload, no flicker. */
     (function() {
-        var INTERVAL_MS = 3000;
-        var _refreshing = false;
-
-        // Make GXT loading mask invisible (keeps DOM detection working via offsetParent)
-        var s = document.createElement('style');
-        s.textContent = '.x-mask{opacity:0!important;background:transparent!important}' +
-                        '.x-mask-msg{display:none!important}';
-        document.head.appendChild(s);
-
-        function findRefreshButton() {
-            var btns = document.querySelectorAll('button');
-            for (var i = 0; i < btns.length; i++) {
-                var b = btns[i];
-                if (!b.disabled && b.offsetParent !== null &&
-                    b.innerHTML.indexOf('fa-refresh') !== -1) return b;
-            }
-            return null;
+        // DeviceGrid.java column indices (0-based):
+        //  0:displayName  1:peerStatus  4:network  5:clientIp  6:hotSpotStatus  7:signal
+        function cellDiv(row, idx) {
+            var td = row.querySelector('td.x-grid3-col-' + idx);
+            return td ? td.querySelector('div') : null;
         }
 
-        function tryAutoRefresh() {
-            if (_refreshing) return;
-            // Skip if any GXT modal window is visible
+        function statusHtml(st) {
+            var online = (st === 'CONNECTED');
+            var c = online ? '0, 128, 0' : '128, 128, 128';
+            return "<i class='fa fa-circle fa-lg' style='color:rgb(" + c + ")'></i>&nbsp;" +
+                   (st || 'UNKNOWN');
+        }
+
+        function apHtml(ap) {
+            var on = ap && ap.toLowerCase() === 'on';
+            var c = on ? '0, 128, 0' : '128, 128, 128';
+            return "<i class='fa fa-circle fa-lg' style='color:rgb(" + c + ")' title='" +
+                   (on ? 'Online' : 'Offline') + "'></i>";
+        }
+
+        function applyUpdate(devices) {
+            var rows = document.querySelectorAll('.x-grid3-body .x-grid3-row');
+            if (!rows.length) return;
+
+            // Index devices by displayName for O(1) row lookup
+            var byName = {};
+            for (var i = 0; i < devices.length; i++) byName[devices[i].dn] = devices[i];
+
+            for (var r = 0; r < rows.length; r++) {
+                var row = rows[r];
+                var nameDiv = cellDiv(row, 0);
+                if (!nameDiv) continue;
+                var dev = byName[nameDiv.textContent.trim()];
+                if (!dev) continue;
+
+                // Status (col 1): icon + text
+                var stDiv = cellDiv(row, 1);
+                if (stDiv) stDiv.innerHTML = statusHtml(dev.st);
+
+                // Network/SSID (col 4)
+                var netDiv = cellDiv(row, 4);
+                if (netDiv) netDiv.textContent = dev.ssid || 'Ethernet';
+
+                // IP (col 5)
+                var ipDiv = cellDiv(row, 5);
+                if (ipDiv) ipDiv.textContent = dev.ip || '';
+
+                // AP/HotSpot (col 6): only update when cache has data
+                if (dev.ap !== '') {
+                    var apDiv = cellDiv(row, 6);
+                    if (apDiv) apDiv.innerHTML = apHtml(dev.ap);
+                }
+
+                // Signal (col 7)
+                var sigDiv = cellDiv(row, 7);
+                if (sigDiv) sigDiv.textContent = dev.sig ? dev.sig + ' dBm' : '';
+            }
+        }
+
+        function poll() {
+            // Skip while any GXT modal is open
             var modals = document.querySelectorAll('.x-window');
             for (var m = 0; m < modals.length; m++) {
                 if (modals[m].offsetParent !== null) return;
             }
-            var btn = findRefreshButton();
-            if (!btn) return;
 
-            // Snapshot the grid data rows as a viewport-fixed overlay
-            var gridBody = document.querySelector('.x-grid3-body');
-            var overlay = null;
-            if (gridBody && gridBody.children.length > 0) {
-                var r = gridBody.getBoundingClientRect();
-                overlay = document.createElement('div');
-                overlay.innerHTML = gridBody.innerHTML;
-                overlay.style.cssText =
-                    'position:fixed;top:' + r.top + 'px;left:' + r.left + 'px;' +
-                    'width:' + r.width + 'px;height:' + r.height + 'px;' +
-                    'overflow:hidden;z-index:1000;background:#fff;pointer-events:none';
-                document.body.appendChild(overlay);
-            }
-
-            _refreshing = true;
-            btn.click();
-
-            // Poll until GXT mask appears then disappears (= new data rendered)
-            var maskSeen = false, ticks = 0;
-            var poll = setInterval(function() {
-                ticks++;
-                var mask = document.querySelector('.x-mask');
-                var maskOn = mask && mask.offsetParent !== null;
-                if (maskOn) maskSeen = true;
-                // Done: mask appeared+gone, OR no mask after 400ms, OR hard 5s timeout
-                if ((maskSeen && !maskOn) || (!maskSeen && ticks > 8) || ticks > 100) {
-                    clearInterval(poll);
-                    _refreshing = false;
-                    if (overlay) {
-                        overlay.style.transition = 'opacity 0.2s ease-out';
-                        overlay.style.opacity = '0';
-                        setTimeout(function() {
-                            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-                        }, 250);
-                    }
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '/device-live-status.jsp', true);
+            xhr.timeout = 2500;
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    try { applyUpdate(JSON.parse(xhr.responseText)); } catch (e) {}
                 }
-            }, 50);
+            };
+            xhr.send();
         }
 
-        // Wait 5 s for GWT to fully initialize, then start polling
-        setTimeout(function() { setInterval(tryAutoRefresh, INTERVAL_MS); }, 5000);
+        // Wait 5 s for GWT to fully render the grid, then poll every 3 s
+        setTimeout(function() { setInterval(poll, 3000); }, 5000);
     })();
     </script>
     </body>

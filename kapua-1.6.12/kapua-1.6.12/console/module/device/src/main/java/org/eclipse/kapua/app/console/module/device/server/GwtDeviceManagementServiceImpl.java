@@ -138,6 +138,11 @@ public class GwtDeviceManagementServiceImpl extends KapuaRemoteServiceServlet im
     private static final ConcurrentHashMap<String, Long> CONFIG_CACHE_TIME = new ConcurrentHashMap<String, Long>();
     private static final long CONFIG_CACHE_TTL_MS = 30_000L;
 
+    // Public accessor for device-live-status.jsp
+    public static List<GwtConfigComponent> getCachedConfig(String deviceId) {
+        return CONFIG_CACHE.get(deviceId);
+    }
+
     //
     // Packages
     //

@@ -82,6 +82,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The server side implementation of the Device RPC service.
@@ -94,6 +95,12 @@ public class GwtDeviceServiceImpl extends KapuaRemoteServiceServlet implements G
     // Cached to avoid an HTTP round-trip for every device in the list.
     private static volatile Map<String, String> _realIpCache = Collections.emptyMap();
     private static volatile long _realIpCacheTime = 0L;
+
+    // Snapshot for device-live-status.jsp: clientId → {dn, id, st, ip}
+    public static volatile Map<String, Map<String, String>> _deviceSnapshot =
+        new ConcurrentHashMap<String, Map<String, String>>();
+
+    public static Map<String, String> getRealIpSnapshot() { return _realIpCache; }
 
     private static Map<String, String> fetchRealIpMap() {
         long now = System.currentTimeMillis();
@@ -428,6 +435,21 @@ public class GwtDeviceServiceImpl extends KapuaRemoteServiceServlet implements G
         gwtResults = new BasePagingLoadResult<GwtDevice>(gwtDevices);
         gwtResults.setOffset(loadConfig != null ? loadConfig.getOffset() : 0);
         gwtResults.setTotalLength(totalResult);
+
+        // Update snapshot for device-live-status.jsp
+        Map<String, Map<String, String>> snap = new ConcurrentHashMap<String, Map<String, String>>();
+        for (GwtDevice gd : gwtDevices) {
+            Map<String, String> info = new HashMap<String, String>();
+            String dn = gd.getDisplayName();
+            info.put("dn", (dn != null && !dn.isEmpty()) ? dn : gd.getClientId());
+            info.put("id", gd.getId());
+            String st = gd.getGwtDeviceConnectionStatus();
+            info.put("st", st != null ? st : "UNKNOWN");
+            String ip = gd.getClientIp();
+            info.put("ip", ip != null ? ip : "");
+            snap.put(gd.getClientId(), info);
+        }
+        _deviceSnapshot = snap;
 
         return gwtResults;
     }
