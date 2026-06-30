@@ -125,6 +125,69 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             self._json_response(mqtt_subscriber.get_presence(cid))
             return
 
+        # ── /device-connections — presence + real TCP source IPs ─────────────
+        # Requires a Kapua Bearer token so random callers cannot enumerate IPs.
+        # On every request: queries the Windows host netstat service in real time,
+        # then matches IPs to client IDs using:
+        #   1. BIRTH-cached ip_map (most reliable)
+        #   2. Exclusion: if the cached IP is gone from netstat, re-assign
+        #   3. 1-device / 1-IP: unambiguous direct assignment
+        if self.path == "/device-connections" or self.path.startswith("/device-connections?"):
+            auth = self.headers.get("Authorization", "")
+            if not (auth.startswith("Bearer ") and len(auth) > 20):
+                body = b'{"error":"Unauthorized"}'
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            import mqtt_subscriber
+            import urllib.request as _ur
+
+            # Real-time netstat from Windows host
+            raw_connections = []
+            try:
+                req = _ur.Request(mqtt_subscriber.HOST_IP_SERVICE, method="GET")
+                with _ur.urlopen(req, timeout=2) as resp:
+                    raw_connections = json.loads(resp.read())
+            except Exception as e:
+                print(f"[device-connections] host service unavailable: {e}", flush=True)
+
+            current_ips = {c["ip"] for c in raw_connections
+                           if isinstance(c, dict) and c.get("ip")}
+
+            presence = mqtt_subscriber.get_presence()
+            ip_map   = mqtt_subscriber.get_ip_map()   # BIRTH-based cache
+
+            # Step 1: keep only BIRTH-cached entries whose IP is still connected
+            valid_map = {cid: ip for cid, ip in ip_map.items() if ip in current_ips}
+
+            # Step 2: find online devices and IPs not yet matched
+            online_cids    = [cid for cid, info in presence.items()
+                              if info.get("status") == "ONLINE"]
+            unmatched_cids = [cid for cid in online_cids if cid not in valid_map]
+            unmatched_ips  = list(current_ips - set(valid_map.values()))
+
+            # Step 3: unambiguous 1-to-1 assignment
+            if len(unmatched_cids) == 1 and len(unmatched_ips) == 1:
+                cid = unmatched_cids[0]
+                valid_map[cid] = unmatched_ips[0]
+                # Update the persistent ip_map so future BIRTH checks stay coherent
+                with mqtt_subscriber._ip_map_lock:
+                    mqtt_subscriber._ip_map[cid] = unmatched_ips[0]
+                print(f"[device-connections] matched {cid} → {unmatched_ips[0]} (exclusion)",
+                      flush=True)
+
+            result = {
+                "devices": {cid: {**info, "realIp": valid_map.get(cid)}
+                            for cid, info in presence.items()},
+                "rawConnections": raw_connections,
+            }
+            self._json_response(result)
+            return
+
         entry = {
             "ts"          : datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
             "method"      : self.command,

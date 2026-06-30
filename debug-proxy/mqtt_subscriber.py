@@ -4,14 +4,15 @@ MQTT subscriber: connects to the Kapua broker and forwards all messages
 to the debug-proxy UI via the shared record() callback.
 Also tracks real-time device presence via BIRTH / DISCONNECT messages.
 """
-import json, os, threading, time
+import json, os, threading, time, urllib.request, urllib.error
 from datetime import datetime, timezone
 
-BROKER_HOST = os.environ.get("MQTT_HOST", "broker")
-BROKER_PORT = int(os.environ.get("MQTT_PORT", "1883"))
-MQTT_USER   = os.environ.get("MQTT_USER", "kapua-broker")
-MQTT_PASS   = os.environ.get("MQTT_PASS", "kapua-password")
-SUBSCRIBE   = os.environ.get("MQTT_TOPICS", "#")
+BROKER_HOST     = os.environ.get("MQTT_HOST",       "broker")
+BROKER_PORT     = int(os.environ.get("MQTT_PORT",   "1883"))
+MQTT_USER       = os.environ.get("MQTT_USER",       "kapua-broker")
+MQTT_PASS       = os.environ.get("MQTT_PASS",       "kapua-password")
+SUBSCRIBE       = os.environ.get("MQTT_TOPICS",     "#")
+HOST_IP_SERVICE = os.environ.get("HOST_IP_SERVICE", "http://host.docker.internal:9998")
 
 _record_fn = None
 
@@ -23,6 +24,57 @@ _presence: dict = {}
 _presence_lock  = threading.Lock()
 
 OFFLINE_TIMEOUT = 120  # seconds — mark UNKNOWN after this long with no message
+
+# ── Real IP tracking (via Windows host netstat service) ──────────────────────
+# Key: clientId (str)  Value: real source IP string
+_ip_map: dict = {}
+_ip_map_lock  = threading.Lock()
+
+
+def get_ip_map() -> dict:
+    with _ip_map_lock:
+        return dict(_ip_map)
+
+
+def _fetch_real_ip(client_id: str):
+    """
+    Query the Windows host netstat service to find the real TCP source IP for
+    this device.  Called in a background thread immediately after a BIRTH event
+    so the TCP connection is already ESTABLISHED in the host's connection table.
+
+    Strategy: take all current port-1883 connections, remove any IPs already
+    claimed by a different ONLINE device, and assign the remainder.
+    """
+    try:
+        req = urllib.request.Request(HOST_IP_SERVICE, method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            connections = json.loads(resp.read())
+    except Exception as e:
+        print(f"[IP] host service unreachable ({HOST_IP_SERVICE}): {e}", flush=True)
+        return
+
+    if not isinstance(connections, list):
+        return
+
+    # IPs already mapped to other ONLINE devices
+    with _presence_lock:
+        online_cids = {cid for cid, info in _presence.items()
+                       if cid != client_id and info.get("status") == "ONLINE"}
+    with _ip_map_lock:
+        claimed = {ip for cid, ip in _ip_map.items() if cid in online_cids}
+
+    candidates = [c["ip"] for c in connections
+                  if isinstance(c, dict) and c.get("ip") and c["ip"] not in claimed]
+
+    if not candidates:
+        print(f"[IP] {client_id}: no unclaimed candidates "
+              f"(connections={connections}, claimed={claimed})", flush=True)
+        return
+
+    real_ip = candidates[-1]   # netstat lists in connection order; last = most recent
+    with _ip_map_lock:
+        _ip_map[client_id] = real_ip
+    print(f"[IP] {client_id} → {real_ip}", flush=True)
 
 
 def get_presence(client_id: str = None) -> dict:
@@ -71,6 +123,8 @@ def _update_presence(topic: str):
                 "status": "ONLINE", "account": account,
                 "clientId": client_id, "ts": now, "topic": topic,
             }
+            threading.Thread(target=_fetch_real_ip, args=(client_id,),
+                             daemon=True).start()
         else:
             # Any other app message → device is alive; keep status, update ts
             if client_id in _presence:

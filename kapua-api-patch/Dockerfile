@@ -10,11 +10,12 @@ COPY JaxbContextResolver.class \
 COPY kapua-gatewayconfig-custom.jar \
      /var/opt/jetty/webapps/root/WEB-INF/lib/kapua-gatewayconfig-custom.jar
 
-# Deploy custom REST API resources (with DeviceNoAuth and registration token APIs)
-COPY kapua-api-resources-running.jar \
+# Deploy patched REST API resources JAR (gateway.broker.* separation)
+# Compiled on host: DeviceNoAuth + Devices use System.getProperty("gateway.broker.*")
+# so internal broker.scheme=tcp is not overridden by the GatewayConfig port/scheme.
+COPY kapua-api-resources-patched.jar \
      /var/opt/jetty/webapps/root/WEB-INF/lib/kapua-rest-api-resources-1.6.12.jar
 
-# DeviceNoAuth provisions broker:connect permission for accounts that predate broker-user creation.
 COPY kapua-broker-api-1.6.12.jar \
      /var/opt/jetty/webapps/root/WEB-INF/lib/kapua-broker-api-1.6.12.jar
 

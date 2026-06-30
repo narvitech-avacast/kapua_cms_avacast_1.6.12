@@ -303,6 +303,12 @@ input:focus,select:focus{border-color:#1a73e8;outline:none;box-shadow:0 0 0 2px 
 </div>
 
 <script>
+// When opened via kapua-console port (8083/8445), redirect to nginx so all
+// /v1/ API calls go to the correct backend instead of returning 404.
+if (['8083', '8445'].includes(location.port)) {
+  location.replace('https://' + location.hostname + location.pathname + location.search + location.hash);
+}
+
 // ── Auth state ───────────────────────────────────────────────────────────────
 let TOKEN = '';
 let SCOPE_ID = '';

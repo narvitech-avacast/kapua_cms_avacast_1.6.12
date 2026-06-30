@@ -24,7 +24,7 @@
   .msg-info{background:#e8f0fe;color:#1a73e8}
   .msg-success{background:#e6f4ea;color:#137333}
   .msg-error{background:#fce8e6;color:#c5221f}
-  .device-status{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .device-status{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px}
   .status-card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:11px 12px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
   .status-label{font-size:11px;color:#777;margin-bottom:4px}
   .status-value{font-size:13px;font-weight:600}
@@ -92,6 +92,10 @@
     <div class="status-card">
       <div class="status-label">Signage 支援</div>
       <div id="device-signage-status" class="status-value status-warn">檢查中...</div>
+    </div>
+    <div class="status-card">
+      <div class="status-label">TCP 連線 IP</div>
+      <div id="device-real-ip" class="status-value status-warn">-</div>
     </div>
   </div>
 
@@ -223,7 +227,9 @@
 <script>
 // When opened directly via kapua-console port (8083/8445), redirect to nginx so
 // all API calls are same-origin and no CORS headers are needed.
-if (['8083', '8445'].includes(location.port)) {
+// throw stops the rest of the script from running (location.replace alone does not).
+const _REDIRECTING = ['8083', '8445'].includes(location.port);
+if (_REDIRECTING) {
   location.replace('https://' + location.hostname + location.pathname + location.hash);
 }
 
@@ -666,6 +672,39 @@ function setStatus(id, text, state) {
   element.className = 'status-value status-' + state;
 }
 
+async function loadRealIp(clientId) {
+  if (!clientId || !TOKEN) return;
+  try {
+    const resp = await fetch(API_ORIGIN + '/device-connections', {headers: JSON_HEADERS});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+
+    // Priority 1: BIRTH-matched or exclusion-matched IP for this device
+    const devInfo = (data.devices || {})[clientId];
+    if (devInfo && devInfo.realIp) {
+      setStatus('device-real-ip', devInfo.realIp, 'ok');
+      return;
+    }
+
+    // Priority 2: only one TCP connection on port 1883 → must be this device
+    const raw = data.rawConnections || [];
+    if (raw.length === 1) {
+      setStatus('device-real-ip', raw[0].ip + ' *', 'ok');
+      return;
+    }
+
+    // Multiple connections but can't match — show the list
+    if (raw.length > 1) {
+      setStatus('device-real-ip', raw.map(c => c.ip).join(' / '), 'warn');
+      return;
+    }
+
+    setStatus('device-real-ip', '未連線 / 未知', 'warn');
+  } catch (_) {
+    setStatus('device-real-ip', '服務未啟動', 'warn');
+  }
+}
+
 async function loadDeviceStatus() {
   setStatus('device-registry-status', '檢查中...', 'warn');
   setStatus('device-connection-status', '檢查中...', 'warn');
@@ -685,6 +724,7 @@ async function loadDeviceStatus() {
     const device = await deviceResponse.json();
     deviceClientId = device.clientId || '';
     setStatus('device-registry-status', device.clientId || '已註冊', 'ok');
+    loadRealIp(deviceClientId);
 
     const apps = String(device.applicationIdentifiers || '')
       .split(',')
@@ -1211,13 +1251,15 @@ function escAttr(value) {
   return escHtml(value).replace(/`/g, '&#96;');
 }
 
-if (!TOKEN || !SCOPE_ID || !DEVICE_ID) {
-  document.getElementById('list-container').innerHTML =
-    '<div class="empty">缺少認證資訊，請從 Kapua 管理介面開啟此頁面。</div>';
-} else {
-  loadDeviceStatus();
-  loadBackgroundImage();
-  loadList();
+if (!_REDIRECTING) {
+  if (!TOKEN || !SCOPE_ID || !DEVICE_ID) {
+    document.getElementById('list-container').innerHTML =
+      '<div class="empty">缺少認證資訊，請從 Kapua 管理介面開啟此頁面。</div>';
+  } else {
+    loadDeviceStatus();
+    loadBackgroundImage();
+    loadList();
+  }
 }
 </script>
 </body>

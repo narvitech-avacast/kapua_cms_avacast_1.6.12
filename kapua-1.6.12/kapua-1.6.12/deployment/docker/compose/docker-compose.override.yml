@@ -1,14 +1,25 @@
 services:
   db:
-    ports:
-      - "3307:3306"
+    # Remove external port binding — only internal Docker access needed.
+    # Use 'docker exec db mysql ...' or port-forward on demand for admin access.
+    ports: !override []
+
+  es:
+    # Remove external port bindings — kapua-api reaches es:9200 via Docker network.
+    ports: !override []
+
+  events-broker:
+    # Remove external port binding — all consumers (broker, kapua-api) are internal.
+    ports: !override []
 
   broker:
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-broker-patch
     image: kapua/kapua-broker:1.6.12-patched
-    # !override replaces the base ports list entirely — removes plain MQTT 1883.
-    # Internal containers (debug-proxy) still reach broker:1883 via Docker network.
+    # !override replaces the base ports list entirely.
+    # 1883: plain MQTT for Android devices (mkcert cert not trusted on Android → SSL unusable)
+    # 8883: MQTTS kept for future use when devices have a trusted CA cert
     ports: !override
+      - "1883:1883"
       - "8883:8883"
       - "52614:61614"
     expose:
@@ -23,11 +34,13 @@ services:
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-api-patch
     image: kapua/kapua-api:1.6.12-patched
     environment:
-      - API_CORS_ORIGINS_ALLOWED=http://localhost:8083,http://172.16.19.37:8083,https://localhost:8445,https://172.16.19.37:8445
+      # Only allow CORS from nginx origins (8083/8445 are closed).
+      - API_CORS_ORIGINS_ALLOWED=https://localhost,https://172.16.19.37
       - SIGNAGE_MEDIA_STORAGE_ROOT=/var/lib/kapua-signage
       - SIGNAGE_MEDIA_PUBLIC_BASE_URL=https://172.16.19.37
-      # Override broker scheme/port so newly registered devices receive MQTTS config
-      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dbroker.scheme=ssl -Dbroker.port=8883 -Dbroker.mqtt.password=kapua-password -Dsso.openid.provider=generic -Dsso.openid.client.id=${KAPUA_OPENID_CLIENT_ID} -Dsso.openid.client.secret=${KAPUA_OPENID_CLIENT_SECRET} -Dsso.openid.generic.jwt.issuer.allowed=https://accounts.google.com -Dsso.openid.generic.jwt.audience.allowed=${KAPUA_OPENID_JWT_AUDIENCE} -Dsso.openid.generic.server.endpoint.auth=https://accounts.google.com/o/oauth2/v2/auth -Dsso.openid.generic.server.endpoint.token=https://oauth2.googleapis.com/token -Dsso.openid.generic.server.endpoint.userinfo=https://www.googleapis.com/oauth2/v3/userinfo -Dsso.openid.claims.externalUsername.key=email
+      # Android devices use plain MQTT tcp:1883 (mkcert CA not trusted on Android).
+      # Remove gateway.broker.* overrides — defaults to tcp:1883 from kapua-environment-setting.properties.
+      - JETTY_DEBUG_OPTS=-Dauthentication.registration.service.enabled=true -Dbroker.mqtt.password=kapua-password -Dsso.openid.provider=generic -Dsso.openid.client.id=${KAPUA_OPENID_CLIENT_ID} -Dsso.openid.client.secret=${KAPUA_OPENID_CLIENT_SECRET} -Dsso.openid.generic.jwt.issuer.allowed=https://accounts.google.com -Dsso.openid.generic.jwt.audience.allowed=${KAPUA_OPENID_JWT_AUDIENCE} -Dsso.openid.generic.server.endpoint.auth=https://accounts.google.com/o/oauth2/v2/auth -Dsso.openid.generic.server.endpoint.token=https://oauth2.googleapis.com/token -Dsso.openid.generic.server.endpoint.userinfo=https://www.googleapis.com/oauth2/v3/userinfo -Dsso.openid.claims.externalUsername.key=email
     volumes:
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/jetty/http-forwarded.ini:/var/opt/jetty/start.d/http-forwarded.ini:ro
       - d:/kapua_0609/kapua_cms_avacast_1.6.12/file-repo-data:/var/lib/kapua-signage
@@ -35,6 +48,13 @@ services:
   kapua-console:
     build: d:/kapua_0609/kapua_cms_avacast_1.6.12/kapua-console-patch
     image: kapua/kapua-console:1.6.12-patched
+    # Remove direct-access ports — all traffic must go through nginx (:443).
+    # SSO OAuth callback already uses https://localhost/openid/callback (nginx),
+    # set in base docker-compose.yml JETTY_DEBUG_OPTS console.sso.openid.redirect.uri.
+    ports: !override []
+    environment:
+      # Update console URL to nginx address (was http://localhost:8083).
+      - KAPUA_CONSOLE_URL=https://172.16.19.37
 
   nginx:
     container_name: nginx
@@ -69,6 +89,7 @@ services:
     environment:
       - PROBE_PORTS=8081,8082,8444
       - MQTT_HOST=broker
+      - HOST_IP_SERVICE=http://host.docker.internal:9998
       - MQTT_PORT=1883   # internal Docker network — not affected by host port removal
       - MQTT_USER=${MQTT_DEBUG_USER:-kapua-broker}
       - MQTT_PASS=${MQTT_DEBUG_PASS:-kapua-password}
