@@ -59,31 +59,79 @@
     </head>
     <body>
     <script>
-    /* Auto-refresh: click the device-list Refresh button every 3 seconds.
-       Skips when a GXT modal dialog is open or the button is not visible. */
+    /* Auto-refresh every 3 s with no visible flicker.
+       Strategy: snapshot grid rows as a fixed overlay before reload;
+       hide GXT's white loading mask via CSS; fade out overlay when done. */
     (function() {
         var INTERVAL_MS = 3000;
+        var _refreshing = false;
 
-        function tryAutoRefresh() {
-            // Skip if any GXT modal window is currently visible
-            var modals = document.querySelectorAll('.x-window');
-            for (var m = 0; m < modals.length; m++) {
-                if (modals[m].offsetParent !== null) { return; }
+        // Make GXT loading mask invisible (keeps DOM detection working via offsetParent)
+        var s = document.createElement('style');
+        s.textContent = '.x-mask{opacity:0!important;background:transparent!important}' +
+                        '.x-mask-msg{display:none!important}';
+        document.head.appendChild(s);
+
+        function findRefreshButton() {
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                var b = btns[i];
+                if (!b.disabled && b.offsetParent !== null &&
+                    b.innerHTML.indexOf('fa-refresh') !== -1) return b;
             }
-            // Find and click the first visible <button> containing the fa-refresh icon
-            var buttons = document.querySelectorAll('button');
-            for (var i = 0; i < buttons.length; i++) {
-                var btn = buttons[i];
-                if (!btn.disabled &&
-                    btn.offsetParent !== null &&
-                    btn.innerHTML.indexOf('fa-refresh') !== -1) {
-                    btn.click();
-                    return;
-                }
-            }
+            return null;
         }
 
-        // Wait 5 s for GWT to initialize, then auto-refresh every 3 s
+        function tryAutoRefresh() {
+            if (_refreshing) return;
+            // Skip if any GXT modal window is visible
+            var modals = document.querySelectorAll('.x-window');
+            for (var m = 0; m < modals.length; m++) {
+                if (modals[m].offsetParent !== null) return;
+            }
+            var btn = findRefreshButton();
+            if (!btn) return;
+
+            // Snapshot the grid data rows as a viewport-fixed overlay
+            var gridBody = document.querySelector('.x-grid3-body');
+            var overlay = null;
+            if (gridBody && gridBody.children.length > 0) {
+                var r = gridBody.getBoundingClientRect();
+                overlay = document.createElement('div');
+                overlay.innerHTML = gridBody.innerHTML;
+                overlay.style.cssText =
+                    'position:fixed;top:' + r.top + 'px;left:' + r.left + 'px;' +
+                    'width:' + r.width + 'px;height:' + r.height + 'px;' +
+                    'overflow:hidden;z-index:1000;background:#fff;pointer-events:none';
+                document.body.appendChild(overlay);
+            }
+
+            _refreshing = true;
+            btn.click();
+
+            // Poll until GXT mask appears then disappears (= new data rendered)
+            var maskSeen = false, ticks = 0;
+            var poll = setInterval(function() {
+                ticks++;
+                var mask = document.querySelector('.x-mask');
+                var maskOn = mask && mask.offsetParent !== null;
+                if (maskOn) maskSeen = true;
+                // Done: mask appeared+gone, OR no mask after 400ms, OR hard 5s timeout
+                if ((maskSeen && !maskOn) || (!maskSeen && ticks > 8) || ticks > 100) {
+                    clearInterval(poll);
+                    _refreshing = false;
+                    if (overlay) {
+                        overlay.style.transition = 'opacity 0.2s ease-out';
+                        overlay.style.opacity = '0';
+                        setTimeout(function() {
+                            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                        }, 250);
+                    }
+                }
+            }, 50);
+        }
+
+        // Wait 5 s for GWT to fully initialize, then start polling
         setTimeout(function() { setInterval(tryAutoRefresh, INTERVAL_MS); }, 5000);
     })();
     </script>
