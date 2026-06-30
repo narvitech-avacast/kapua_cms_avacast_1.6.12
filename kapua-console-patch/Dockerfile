@@ -9,20 +9,22 @@ COPY --from=kapua/kapua-console:1.6.12 \
 COPY --from=kapua/kapua-console:1.6.12 \
      /opt/jetty/lib/servlet-api-3.1.jar /classpath/servlet-api-3.1.jar
 
-# Place source in the correct package directory tree (required by javac)
+# Place sources in the correct package directory tree (required by javac)
 WORKDIR /src
 COPY GwtDeviceServiceImpl.java \
      org/eclipse/kapua/app/console/module/device/server/GwtDeviceServiceImpl.java
+COPY GwtDeviceManagementServiceImpl.java \
+     org/eclipse/kapua/app/console/module/device/server/GwtDeviceManagementServiceImpl.java
 
-# Compile
+# Compile both patched server-side files
 RUN javac -encoding UTF-8 -cp "/classpath/*" \
-    org/eclipse/kapua/app/console/module/device/server/GwtDeviceServiceImpl.java
+    org/eclipse/kapua/app/console/module/device/server/GwtDeviceServiceImpl.java \
+    org/eclipse/kapua/app/console/module/device/server/GwtDeviceManagementServiceImpl.java
 
-# Use the pre-patched JAR (contains GwtDeviceManagementServiceImpl with ESF fallback)
-# as the base, then inject only the freshly compiled GwtDeviceServiceImpl*.class
+# Inject all freshly compiled classes into the pre-patched JAR
 COPY kapua-console-module-device-1.6.12.jar /tmp/device-patched.jar
-RUN find . -name 'GwtDeviceServiceImpl*.class' | sed 's|^\./||' | \
-    xargs jar uf /tmp/device-patched.jar
+RUN (find . -name 'GwtDeviceServiceImpl*.class'; find . -name 'GwtDeviceManagementServiceImpl*.class') \
+    | sed 's|^\./||' | xargs jar uf /tmp/device-patched.jar
 
 # Stage 2: final image — copy patched JAR and static web files
 FROM kapua/kapua-console:1.6.12

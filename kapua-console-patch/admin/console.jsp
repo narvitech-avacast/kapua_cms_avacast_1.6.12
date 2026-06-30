@@ -58,5 +58,34 @@
 
     </head>
     <body>
+    <script>
+    /* Auto-refresh: click the device-list Refresh button every 3 seconds.
+       Skips when a GXT modal dialog is open or the button is not visible. */
+    (function() {
+        var INTERVAL_MS = 3000;
+
+        function tryAutoRefresh() {
+            // Skip if any GXT modal window is currently visible
+            var modals = document.querySelectorAll('.x-window');
+            for (var m = 0; m < modals.length; m++) {
+                if (modals[m].offsetParent !== null) { return; }
+            }
+            // Find and click the first visible <button> containing the fa-refresh icon
+            var buttons = document.querySelectorAll('button');
+            for (var i = 0; i < buttons.length; i++) {
+                var btn = buttons[i];
+                if (!btn.disabled &&
+                    btn.offsetParent !== null &&
+                    btn.innerHTML.indexOf('fa-refresh') !== -1) {
+                    btn.click();
+                    return;
+                }
+            }
+        }
+
+        // Wait 5 s for GWT to initialize, then auto-refresh every 3 s
+        setTimeout(function() { setInterval(tryAutoRefresh, INTERVAL_MS); }, 5000);
+    })();
+    </script>
     </body>
 </html>
