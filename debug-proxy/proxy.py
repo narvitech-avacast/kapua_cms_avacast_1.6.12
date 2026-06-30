@@ -116,6 +116,40 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def handle_any(self):
+        # ── /internal/netstat-ips — server-to-server, no auth (not in nginx) ──
+        # Returns {"clientId": "realIp", ...} for GwtDeviceServiceImpl to use.
+        # Never add this path to nginx — it must stay Docker-internal only.
+        if self.path == "/internal/netstat-ips":
+            import mqtt_subscriber
+            import urllib.request as _ur
+            raw_connections = []
+            try:
+                req = _ur.Request(mqtt_subscriber.HOST_IP_SERVICE, method="GET")
+                with _ur.urlopen(req, timeout=2) as resp:
+                    raw_connections = json.loads(resp.read())
+            except Exception:
+                pass
+            current_ips = {c["ip"] for c in raw_connections
+                           if isinstance(c, dict) and c.get("ip")}
+            ip_map = mqtt_subscriber.get_ip_map()
+            valid_map = {cid: ip for cid, ip in ip_map.items() if ip in current_ips}
+            # 1-device / 1-IP exclusion (same logic as /device-connections)
+            online_cids   = [cid for cid, info in mqtt_subscriber.get_presence().items()
+                             if info.get("status") == "ONLINE"]
+            unmatched_cids = [cid for cid in online_cids if cid not in valid_map]
+            unmatched_ips  = list(current_ips - set(valid_map.values()))
+            if len(unmatched_cids) == 1 and len(unmatched_ips) == 1:
+                cid = unmatched_cids[0]
+                valid_map[cid] = unmatched_ips[0]
+                with mqtt_subscriber._ip_map_lock:
+                    mqtt_subscriber._ip_map[cid] = unmatched_ips[0]
+            # If presence is empty (no BIRTH yet) but only 1 TCP connection,
+            # return raw IPs keyed by a sentinel so Java can still use it.
+            if not valid_map and len(raw_connections) == 1:
+                valid_map["__single__"] = raw_connections[0]["ip"]
+            self._json_response(valid_map)
+            return
+
         # ── /mqtt-presence — real-time device online/offline status ──────────
         if self.path == "/mqtt-presence" or self.path.startswith("/mqtt-presence?"):
             import mqtt_subscriber
