@@ -148,11 +148,41 @@
 
   <div id="illuminet-panel" class="form-card appearance-panel">
     <div class="panel-heading">
-      <h2>Illuminet Matrix</h2>
-      <span id="illuminet-status" class="inline-status">尚未查詢</span>
+      <h2>Illuminet Matrix — Annotator</h2>
+      <span id="illuminet-status" class="inline-status">尚未設定</span>
+    </div>
+    <div class="form-row">
+      <label for="illuminet-ip">裝置 IP</label>
+      <input type="text" id="illuminet-ip" value="172.16.19.37" placeholder="例：172.16.19.37">
+    </div>
+    <div class="form-row">
+      <label class="tog">
+        <input type="checkbox" id="illuminet-annotator-enable" onchange="setToggle2(this,'illuminet-enable-track','illuminet-enable-label')">
+        <span class="tog-track" id="illuminet-enable-track"></span>
+        <span class="tog-label" id="illuminet-enable-label">Off</span>
+      </label>
+      <span style="margin-left:8px;color:#777">啟用 Annotator</span>
+    </div>
+    <div class="form-row">
+      <label class="tog">
+        <input type="checkbox" id="illuminet-annotator-visible" onchange="setToggle2(this,'illuminet-visible-track','illuminet-visible-label')">
+        <span class="tog-track" id="illuminet-visible-track"></span>
+        <span class="tog-label" id="illuminet-visible-label">Off</span>
+      </label>
+      <span style="margin-left:8px;color:#777">顯示 Annotator 工具列</span>
+    </div>
+    <div class="form-row">
+      <label>畫筆顏色</label>
+      <div class="weekday-group" id="illuminet-brush-colors">
+        <label class="weekday-option"><input type="radio" name="illuminet-brush-color" value="1"><span style="display:inline-block;width:12px;height:12px;background:#83AC93;border-radius:2px;margin-right:4px"></span>綠</label>
+        <label class="weekday-option"><input type="radio" name="illuminet-brush-color" value="2"><span style="display:inline-block;width:12px;height:12px;background:#70068A;border-radius:2px;margin-right:4px"></span>紫</label>
+        <label class="weekday-option"><input type="radio" name="illuminet-brush-color" value="3"><span style="display:inline-block;width:12px;height:12px;background:#B14E57;border-radius:2px;margin-right:4px"></span>紅</label>
+        <label class="weekday-option"><input type="radio" name="illuminet-brush-color" value="4"><span style="display:inline-block;width:12px;height:12px;background:#2378B2;border-radius:2px;margin-right:4px"></span>藍</label>
+        <label class="weekday-option"><input type="radio" name="illuminet-brush-color" value="5"><span style="display:inline-block;width:12px;height:12px;background:#CCA648;border-radius:2px;margin-right:4px"></span>黃</label>
+      </div>
     </div>
     <div class="form-actions">
-      <button id="illuminet-multicast-btn" class="btn btn-secondary" onclick="queryIlluminetMulticastStatus()">查詢 Multicast 狀態</button>
+      <button id="illuminet-apply-btn" class="btn btn-primary" onclick="applyIlluminetAnnotator()">套用到裝置</button>
     </div>
     <pre id="illuminet-result" style="display:none;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:4px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-all;margin-top:10px"></pre>
   </div>
@@ -255,7 +285,6 @@ const APPEARANCE_BASE =
   `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/configurations/${encodeURIComponent(APPEARANCE_CONFIG_ID)}`;
 const JSON_HEADERS = {'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json','Accept':'application/json'};
 const BACKGROUND_IMAGE_LIST_NAME = '__AVA_BACKGROUND_IMAGE__';
-const ILLUMINET_BASE = `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/illuminet`;
 
 let editingId = null;
 let mediaItems = [];
@@ -948,7 +977,16 @@ function asArray(value) {
   return Array.isArray(value) ? value : [value];
 }
 
-// ── Illuminet Matrix (piggybacked on SIGNAGE-V1) ────────────────────────────
+// ── Illuminet Matrix — Annotator (direct HTTP to device, bypasses MQTT) ────
+
+const ILLUMINET_BASE = `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/illuminet`;
+
+function setToggle2(input, trackId, labelId) {
+  const track = document.getElementById(trackId);
+  const label = document.getElementById(labelId);
+  if (track) track.classList[input.checked ? 'add' : 'remove']('is-on');
+  if (label) label.textContent = input.checked ? 'On' : 'Off';
+}
 
 function setIlluminetStatus(text, state) {
   const el = document.getElementById('illuminet-status');
@@ -956,26 +994,46 @@ function setIlluminetStatus(text, state) {
   el.className = 'inline-status' + (state ? ' ' + state : '');
 }
 
-async function queryIlluminetMulticastStatus() {
-  if (!TOKEN || !SCOPE_ID || !DEVICE_ID) return;
-  const btn = document.getElementById('illuminet-multicast-btn');
+async function illuminetPut(path, params) {
+  const ip = document.getElementById('illuminet-ip').value.trim();
+  const query = new URLSearchParams({ ip, ...params, timeout: '5000' }).toString();
+  const response = await fetch(`${ILLUMINET_BASE}/${path}?${query}`, {
+    method: 'PUT',
+    headers: JSON_HEADERS
+  });
+  const result = await readJson(response);
+  if (!response.ok) {
+    throw new Error(apiErrorMessage(response, result, path + ' 失敗'));
+  }
+  return result;
+}
+
+async function applyIlluminetAnnotator() {
+  const ip = document.getElementById('illuminet-ip').value.trim();
+  if (!ip) { setIlluminetStatus('請輸入裝置 IP', 'error'); return; }
+  const btn = document.getElementById('illuminet-apply-btn');
   const resultEl = document.getElementById('illuminet-result');
   btn.disabled = true;
   resultEl.style.display = 'none';
-  setIlluminetStatus('查詢中...', 'loading');
+  setIlluminetStatus('套用中...', 'loading');
+
+  const enable = document.getElementById('illuminet-annotator-enable').checked ? 1 : 0;
+  const visible = document.getElementById('illuminet-annotator-visible').checked ? 1 : 0;
+  const colorInput = document.querySelector('input[name="illuminet-brush-color"]:checked');
+
+  const results = {};
   try {
-    const response = await fetch(ILLUMINET_BASE + '/status/multicast?timeout=5000', {
-      method: 'GET',
-      headers: JSON_HEADERS
-    });
-    const result = await readJson(response);
-    if (!response.ok) {
-      throw new Error(apiErrorMessage(response, result, 'Multicast 狀態查詢失敗'));
+    results.enable = await illuminetPut('annotator/enable', { enable: String(enable) });
+    results.visible = await illuminetPut('annotator/visible', { visible: String(visible) });
+    if (colorInput) {
+      results['brush-color'] = await illuminetPut('annotator/brush-color', { color: colorInput.value });
     }
-    resultEl.textContent = JSON.stringify(result, null, 2);
+    resultEl.textContent = JSON.stringify(results, null, 2);
     resultEl.style.display = 'block';
-    setIlluminetStatus('查詢成功', 'success');
+    setIlluminetStatus('已套用到裝置', 'success');
   } catch (error) {
+    resultEl.textContent = JSON.stringify(results, null, 2);
+    resultEl.style.display = 'block';
     setIlluminetStatus(error.message, 'error');
   } finally {
     btn.disabled = false;
