@@ -1,6 +1,7 @@
 <%@ page language="java" contentType="application/json;charset=UTF-8" trimDirectiveWhitespaces="true" %>
 <%@ page import="java.util.List" %>
 <%@ page import="java.util.Map" %>
+<%@ page import="org.eclipse.kapua.commons.security.KapuaSecurityUtils" %>
 <%@ page import="org.eclipse.kapua.app.console.module.device.server.GwtDeviceServiceImpl" %>
 <%@ page import="org.eclipse.kapua.app.console.module.device.server.GwtDeviceManagementServiceImpl" %>
 <%@ page import="org.eclipse.kapua.app.console.module.api.shared.model.GwtConfigComponent" %>
@@ -9,9 +10,8 @@
     response.setHeader("Cache-Control", "no-cache, no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
 
-    // Require an active Kapua console session
-    javax.servlet.http.HttpSession sess = request.getSession(false);
-    if (sess == null || sess.getAttribute("console.current.session") == null) {
+    // Require an active KapuaSession (set by KapuaWebFilter before chain execution)
+    if (KapuaSecurityUtils.getSession() == null) {
         response.sendError(401);
         return;
     }
