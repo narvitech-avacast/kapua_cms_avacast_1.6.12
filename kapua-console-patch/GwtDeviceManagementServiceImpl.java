@@ -136,11 +136,19 @@ public class GwtDeviceManagementServiceImpl extends KapuaRemoteServiceServlet im
 
     private static final ConcurrentHashMap<String, List<GwtConfigComponent>> CONFIG_CACHE = new ConcurrentHashMap<String, List<GwtConfigComponent>>();
     private static final ConcurrentHashMap<String, Long> CONFIG_CACHE_TIME = new ConcurrentHashMap<String, Long>();
-    private static final long CONFIG_CACHE_TTL_MS = 30_000L;
+    // Cache TTL: re-query device via MQTT if data is older than this.
+    // Refresh button calls evictAllNetworkConfigCache() to force immediate re-query.
+    private static final long CONFIG_CACHE_TTL_MS = 60_000L; // 60 seconds
 
     // Public accessor for device-live-status.jsp
     public static List<GwtConfigComponent> getCachedConfig(String deviceId) {
         return CONFIG_CACHE.get(deviceId);
+    }
+
+    // Called by network-refresh.jsp when user explicitly presses Refresh.
+    public static void evictAllNetworkConfigCache() {
+        CONFIG_CACHE.clear();
+        CONFIG_CACHE_TIME.clear();
     }
 
     //
@@ -423,6 +431,7 @@ public class GwtDeviceManagementServiceImpl extends KapuaRemoteServiceServlet im
                     if (!esfConfigs.isEmpty()) {
                         CONFIG_CACHE.put(device.getId(), esfConfigs);
                         CONFIG_CACHE_TIME.put(device.getId(), System.currentTimeMillis());
+                        LOG.info("ESF XML fallback cached {} components for device {}", esfConfigs.size(), device.getId());
                         return esfConfigs;
                     }
                 } catch (Exception parseEx) {
