@@ -152,7 +152,14 @@
       <span id="illuminet-status" class="inline-status">尚未設定</span>
     </div>
     <div class="form-row">
-      <label for="illuminet-ip">裝置 IP</label>
+      <label>傳輸方式</label>
+      <div class="weekday-group">
+        <label class="weekday-option"><input type="radio" name="illuminet-transport" value="http" checked onchange="onIlluminetTransportChange()">直接 HTTP（裝置需與 CMS 同網段可直連）</label>
+        <label class="weekday-option"><input type="radio" name="illuminet-transport" value="mqtt" onchange="onIlluminetTransportChange()">MQTT（透過裝置既有 MQTT 連線，需裝置端 SIGNAGE-V1 handler 配合）</label>
+      </div>
+    </div>
+    <div class="form-row" id="illuminet-ip-row">
+      <label for="illuminet-ip">裝置 IP（直接 HTTP 模式用）</label>
       <input type="text" id="illuminet-ip" value="172.16.19.37" placeholder="例：172.16.19.37">
     </div>
     <div class="form-row">
@@ -994,10 +1001,24 @@ function setIlluminetStatus(text, state) {
   el.className = 'inline-status' + (state ? ' ' + state : '');
 }
 
+function illuminetTransport() {
+  const checked = document.querySelector('input[name="illuminet-transport"]:checked');
+  return checked ? checked.value : 'http';
+}
+
+function onIlluminetTransportChange() {
+  document.getElementById('illuminet-ip-row').style.display =
+    illuminetTransport() === 'http' ? '' : 'none';
+}
+
 async function illuminetPut(path, params) {
-  const ip = document.getElementById('illuminet-ip').value.trim();
-  const query = new URLSearchParams({ ip, ...params, timeout: '5000' }).toString();
-  const response = await fetch(`${ILLUMINET_BASE}/${path}?${query}`, {
+  const transport = illuminetTransport();
+  const fullPath = transport === 'mqtt' ? `mqtt/${path}` : path;
+  const query = new URLSearchParams({ ...params, timeout: '5000' });
+  if (transport === 'http') {
+    query.set('ip', document.getElementById('illuminet-ip').value.trim());
+  }
+  const response = await fetch(`${ILLUMINET_BASE}/${fullPath}?${query.toString()}`, {
     method: 'PUT',
     headers: JSON_HEADERS
   });
@@ -1009,8 +1030,11 @@ async function illuminetPut(path, params) {
 }
 
 async function applyIlluminetAnnotator() {
-  const ip = document.getElementById('illuminet-ip').value.trim();
-  if (!ip) { setIlluminetStatus('請輸入裝置 IP', 'error'); return; }
+  const transport = illuminetTransport();
+  if (transport === 'http' && !document.getElementById('illuminet-ip').value.trim()) {
+    setIlluminetStatus('請輸入裝置 IP', 'error');
+    return;
+  }
   const btn = document.getElementById('illuminet-apply-btn');
   const resultEl = document.getElementById('illuminet-result');
   btn.disabled = true;

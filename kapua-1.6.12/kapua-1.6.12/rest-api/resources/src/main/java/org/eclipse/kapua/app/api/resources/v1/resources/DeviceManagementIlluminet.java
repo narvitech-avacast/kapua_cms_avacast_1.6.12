@@ -18,6 +18,16 @@ import org.eclipse.kapua.model.domain.Actions;
 import org.eclipse.kapua.service.authorization.AuthorizationService;
 import org.eclipse.kapua.service.authorization.permission.PermissionFactory;
 import org.eclipse.kapua.service.device.management.DeviceManagementDomains;
+import org.eclipse.kapua.service.device.management.exception.DeviceManagementTimeoutException;
+import org.eclipse.kapua.service.device.management.exception.DeviceNotConnectedException;
+import org.eclipse.kapua.service.device.management.message.KapuaAppProperties;
+import org.eclipse.kapua.service.device.management.message.KapuaMethod;
+import org.eclipse.kapua.service.device.management.request.DeviceRequestManagementService;
+import org.eclipse.kapua.service.device.management.request.GenericRequestFactory;
+import org.eclipse.kapua.service.device.management.request.message.request.GenericRequestChannel;
+import org.eclipse.kapua.service.device.management.request.message.request.GenericRequestMessage;
+import org.eclipse.kapua.service.device.management.request.message.request.GenericRequestPayload;
+import org.eclipse.kapua.service.device.management.request.message.response.GenericResponseMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,6 +35,7 @@ import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonStructure;
 import javax.json.JsonWriter;
+import javax.ws.rs.DefaultValue;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -42,16 +53,27 @@ import java.net.HttpURLConnection;
 import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Date;
 
 /**
- * Calls the Illuminet Matrix RX device's own local HTTP API
- * ({@code http://{ip}:9090/illuminet/...}) directly from the CMS backend, bypassing
- * MQTT/Kura entirely. This works because the RX device already exposes this API on its
- * own, on the same LAN as the CMS host (per "Illuminet Matrix feature command guide"),
- * so no device-side firmware/bridge changes are needed at all.
- * <p>
- * The target device is identified by IP address (query param {@code ip}), not by Kapua
- * device/clientId, since Illuminet's own API has no such concept.
+ * Controls Illuminet Matrix RX devices two ways:
+ * <ul>
+ *   <li>Direct HTTP ({@code annotator/*} methods below): the CMS backend calls the RX
+ *   device's own local API ({@code http://{ip}:9090/illuminet/...}) directly, bypassing
+ *   MQTT/Kura entirely. Works today with zero device-side changes, but requires the CMS
+ *   host to have direct inbound-reachable network access to the device (same LAN, no
+ *   NAT/firewall in between).</li>
+ *   <li>MQTT ({@code mqtt/annotator/*} methods below): the same command is sent as an
+ *   MQTT message over the device's already-subscribed {@code SIGNAGE-V1} app (same
+ *   appName/version as {@link DeviceManagementDigitalSignage}), resource={@code illuminet},
+ *   so it works even if the device is behind NAT/firewall and only has outbound MQTT
+ *   connectivity — but requires the device-side SIGNAGE-V1 handler to add a branch for
+ *   resource=="illuminet" that reads the {@code illuminet.feature} metric (e.g.
+ *   {@code "Annotator?enable=1"}), calls its own local
+ *   {@code http://127.0.0.1:9090/illuminet/<feature>}, and returns the JSON as the
+ *   response body. That device-side change is out of scope of this repository.</li>
+ * </ul>
  */
 @Path("{scopeId}/devices/{deviceId}/illuminet")
 public class DeviceManagementIlluminet extends AbstractKapuaResource {
@@ -69,6 +91,21 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
             LOCATOR.getService(AuthorizationService.class);
     private static final PermissionFactory PERMISSION_FACTORY =
             LOCATOR.getFactory(PermissionFactory.class);
+    private static final DeviceRequestManagementService REQUEST_SERVICE =
+            LOCATOR.getService(DeviceRequestManagementService.class);
+    private static final GenericRequestFactory REQUEST_FACTORY =
+            LOCATOR.getFactory(GenericRequestFactory.class);
+
+    // Piggyback on the device's already-subscribed SIGNAGE-V1 app instead of a new,
+    // unsubscribed ILLUMINET-V1 app (see DeviceManagementDigitalSignage for the same values).
+    private static final KapuaAppProperties MQTT_APP_NAME = () -> "SIGNAGE";
+    private static final KapuaAppProperties MQTT_APP_VERSION = () -> "V1";
+    private static final String MQTT_ILLUMINET_RESOURCE = "illuminet";
+    private static final String MQTT_FEATURE_METRIC = "illuminet.feature";
+    private static final long MQTT_DEFAULT_TIMEOUT = 5000L;
+    private static final long MQTT_MAX_TIMEOUT = 10000L;
+
+    // ── Direct HTTP (CMS backend -> device's own :9090 API) ─────────────────────
 
     /** Enable/disable the annotator feature. Mirrors {@code GET /illuminet/Annotator?enable=0|1}. */
     @PUT
@@ -119,6 +156,126 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
         }
         LOGGER.info("Illuminet: set annotator brush-color={} ip={}", color, ip);
         return forward(ip, "Annotator?brush-color=" + color);
+    }
+
+    // ── MQTT (piggybacked on SIGNAGE-V1, for devices without direct HTTP reachability) ──
+
+    /** MQTT equivalent of {@link #setAnnotatorEnable}. */
+    @PUT
+    @Path("mqtt/annotator/enable")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setAnnotatorEnableMqtt(
+            @PathParam("scopeId") ScopeId scopeId,
+            @PathParam("deviceId") EntityId deviceId,
+            @QueryParam("enable") int enable,
+            @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
+        checkPermission(scopeId, Actions.write);
+        if (enable != 0 && enable != 1) {
+            return badRequest("enable must be 0 or 1");
+        }
+        LOGGER.info("Illuminet (MQTT): set annotator enable={} scopeId={} deviceId={}", enable, scopeId, deviceId);
+        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?enable=" + enable);
+    }
+
+    /** MQTT equivalent of {@link #setAnnotatorVisible}. */
+    @PUT
+    @Path("mqtt/annotator/visible")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setAnnotatorVisibleMqtt(
+            @PathParam("scopeId") ScopeId scopeId,
+            @PathParam("deviceId") EntityId deviceId,
+            @QueryParam("visible") int visible,
+            @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
+        checkPermission(scopeId, Actions.write);
+        if (visible != 0 && visible != 1) {
+            return badRequest("visible must be 0 or 1");
+        }
+        LOGGER.info("Illuminet (MQTT): set annotator visible={} scopeId={} deviceId={}", visible, scopeId, deviceId);
+        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?visible=" + visible);
+    }
+
+    /** MQTT equivalent of {@link #setAnnotatorBrushColor}. */
+    @PUT
+    @Path("mqtt/annotator/brush-color")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setAnnotatorBrushColorMqtt(
+            @PathParam("scopeId") ScopeId scopeId,
+            @PathParam("deviceId") EntityId deviceId,
+            @QueryParam("color") int color,
+            @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
+        checkPermission(scopeId, Actions.write);
+        if (color < 1 || color > 5) {
+            return badRequest("color must be between 1 and 5");
+        }
+        LOGGER.info("Illuminet (MQTT): set annotator brush-color={} scopeId={} deviceId={}", color, scopeId, deviceId);
+        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?brush-color=" + color);
+    }
+
+    /**
+     * Send the given Illuminet feature path to the device over the (already-subscribed)
+     * SIGNAGE-V1 MQTT app, resource=illuminet, and relay the device's JSON response
+     * straight through as the REST response body.
+     *
+     * @param feature the Illuminet HTTP feature path + query, e.g. "Annotator?enable=1"
+     */
+    private Response forwardMqtt(ScopeId scopeId, EntityId deviceId, Long timeout, String feature) throws KapuaException {
+        GenericRequestChannel channel = REQUEST_FACTORY.newRequestChannel();
+        channel.setAppName(MQTT_APP_NAME);
+        channel.setVersion(MQTT_APP_VERSION);
+        channel.setMethod(KapuaMethod.EXECUTE);
+        channel.setResources(Arrays.asList(MQTT_ILLUMINET_RESOURCE));
+
+        GenericRequestPayload payload = REQUEST_FACTORY.newRequestPayload();
+        payload.getMetrics().put(MQTT_FEATURE_METRIC, feature);
+
+        GenericRequestMessage request = REQUEST_FACTORY.newRequestMessage();
+        request.setScopeId(scopeId);
+        request.setDeviceId(deviceId);
+        request.setCapturedOn(new Date());
+        request.setChannel(channel);
+        request.setPayload(payload);
+
+        long requestTimeout = (timeout == null || timeout <= 0) ? MQTT_DEFAULT_TIMEOUT : Math.min(timeout, MQTT_MAX_TIMEOUT);
+        LOGGER.info(
+                "Illuminet (MQTT): sending scopeId={} deviceId={} appId=SIGNAGE-V1 resource=illuminet feature={} timeout={}",
+                scopeId, deviceId, feature, requestTimeout);
+
+        GenericResponseMessage response;
+        try {
+            response = REQUEST_SERVICE.exec(scopeId, deviceId, request, requestTimeout);
+        } catch (DeviceNotConnectedException e) {
+            return errorResponse(Response.Status.SERVICE_UNAVAILABLE, "DEVICE_OFFLINE", safeMessage(e));
+        } catch (DeviceManagementTimeoutException e) {
+            return errorResponse(Response.Status.GATEWAY_TIMEOUT, "DEVICE_TIMEOUT", safeMessage(e));
+        }
+
+        if (response == null) {
+            return errorResponse(Response.Status.BAD_GATEWAY, "INVALID_DEVICE_RESPONSE", "Device returned no response");
+        }
+
+        byte[] bodyBytes = (response.getPayload() != null) ? response.getPayload().getBody() : null;
+        String responseJson = (bodyBytes != null && bodyBytes.length > 0)
+                ? new String(bodyBytes, StandardCharsets.UTF_8)
+                : "{}";
+
+        return Response.status(mapResponseCode(response))
+                .type(MediaType.APPLICATION_JSON)
+                .entity(responseJson)
+                .build();
+    }
+
+    private int mapResponseCode(GenericResponseMessage response) {
+        if (response.getResponseCode() == null) {
+            return Response.Status.BAD_GATEWAY.getStatusCode();
+        }
+        switch (response.getResponseCode()) {
+            case ACCEPTED: return 200;
+            case SENT: return 202;
+            case BAD_REQUEST: return 400;
+            case NOT_FOUND: return 404;
+            case INTERNAL_ERROR: return 500;
+            default: return 502;
+        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
