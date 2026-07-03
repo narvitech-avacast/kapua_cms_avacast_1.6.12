@@ -93,7 +93,7 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
             @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
         checkPermission(scopeId, Actions.read);
         LOGGER.info("Illuminet: query multicast status scopeId={} deviceId={}", scopeId, deviceId);
-        return forward(scopeId, deviceId, timeout, KapuaMethod.GET, Arrays.asList("status", "multicast"), null);
+        return forward(scopeId, deviceId, timeout, KapuaMethod.READ, Arrays.asList("status", "multicast"), null);
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
