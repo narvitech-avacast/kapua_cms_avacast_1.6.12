@@ -255,7 +255,9 @@ const APPEARANCE_BASE =
   `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/configurations/${encodeURIComponent(APPEARANCE_CONFIG_ID)}`;
 const JSON_HEADERS = {'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json','Accept':'application/json'};
 const BACKGROUND_IMAGE_LIST_NAME = '__AVA_BACKGROUND_IMAGE__';
-const ILLUMINET_BASE = `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/illuminet`;
+const ILLUMINET_CONFIG_ID = 'com.PeerInternet.Illuminet.Config';
+const ILLUMINET_CONFIG_BASE =
+  `${API_ORIGIN}/v1/${encodeURIComponent(SCOPE_ID)}/devices/${encodeURIComponent(DEVICE_ID)}/configurations/${encodeURIComponent(ILLUMINET_CONFIG_ID)}`;
 
 let editingId = null;
 let mediaItems = [];
@@ -858,7 +860,7 @@ async function loadAppearanceSettings() {
     if (!response.ok) {
       throw new Error(apiErrorMessage(response, result, 'Appearance 設定讀取失敗'));
     }
-    const config = findAppearanceConfig(result);
+    const config = findDeviceConfig(result, APPEARANCE_CONFIG_ID);
     const overlayEl = document.getElementById('appearance-overlay');
     overlayEl.checked = readConfigProperty(config, 'SignageOverlayConfig', '1') === '0';
     setToggle(overlayEl);
@@ -916,15 +918,15 @@ function buildIntegerProperty(name, value) {
   };
 }
 
-function findAppearanceConfig(payload) {
+function findDeviceConfig(payload, componentId) {
   if (!payload) return null;
-  if (payload.id === APPEARANCE_CONFIG_ID || payload.properties) return payload;
+  if (payload.id === componentId || payload.properties) return payload;
   const candidates = []
     .concat(asArray(payload.configuration))
     .concat(asArray(payload.configurations))
     .concat(asArray(payload.componentConfigurations))
     .concat(asArray(payload.componentConfigurations && payload.componentConfigurations.configuration));
-  return candidates.find(item => item && item.id === APPEARANCE_CONFIG_ID) || null;
+  return candidates.find(item => item && item.id === componentId) || null;
 }
 
 function readConfigProperty(config, name, fallback) {
@@ -964,7 +966,12 @@ async function queryIlluminetMulticastStatus() {
   resultEl.style.display = 'none';
   setIlluminetStatus('查詢中...', 'loading');
   try {
-    const response = await fetch(ILLUMINET_BASE + '/status/multicast?timeout=5000', {
+    // Mirrors loadAppearanceSettings(): plain GET on the stock Kapua Device
+    // Configuration API (configurations/{componentId}), no custom REST resource.
+    // Contract: device's Kura agent must expose a configurable component with
+    // id=com.PeerInternet.Illuminet.Config and a String property "MulticastStatus"
+    // holding the raw JSON from its local GET /illuminet/status/multicast.
+    const response = await fetch(ILLUMINET_CONFIG_BASE + '?timeout=5000', {
       method: 'GET',
       headers: JSON_HEADERS
     });
@@ -972,13 +979,24 @@ async function queryIlluminetMulticastStatus() {
     if (!response.ok) {
       throw new Error(apiErrorMessage(response, result, 'Multicast 狀態查詢失敗'));
     }
-    resultEl.textContent = JSON.stringify(result, null, 2);
+    const config = findDeviceConfig(result, ILLUMINET_CONFIG_ID);
+    const statusJson = readConfigProperty(config, 'MulticastStatus', '');
+    resultEl.textContent = formatIlluminetStatus(statusJson);
     resultEl.style.display = 'block';
     setIlluminetStatus('查詢成功', 'success');
   } catch (error) {
     setIlluminetStatus(error.message, 'error');
   } finally {
     btn.disabled = false;
+  }
+}
+
+function formatIlluminetStatus(rawValue) {
+  if (!rawValue) return '(裝置未回傳 MulticastStatus)';
+  try {
+    return JSON.stringify(JSON.parse(rawValue), null, 2);
+  } catch (error) {
+    return rawValue;
   }
 }
 
