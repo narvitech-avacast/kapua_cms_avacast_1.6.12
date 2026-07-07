@@ -69,10 +69,12 @@ import java.util.Date;
  *   appName/version as {@link DeviceManagementDigitalSignage}), resource={@code illuminet},
  *   so it works even if the device is behind NAT/firewall and only has outbound MQTT
  *   connectivity — but requires the device-side SIGNAGE-V1 handler to add a branch for
- *   resource=="illuminet" that reads the {@code illuminet.feature} metric (e.g.
- *   {@code "Annotator?enable=1"}), calls its own local
- *   {@code http://127.0.0.1:9090/illuminet/<feature>}, and returns the JSON as the
- *   response body. That device-side change is out of scope of this repository.</li>
+ *   resource=="illuminet" that reads the {@code illuminet.ip}/{@code illuminet.port}/
+ *   {@code illuminet.feature} metrics (e.g. ip=172.16.19.37, port=9090,
+ *   feature="Annotator?enable=1"), calls {@code http://<ip>:<port>/illuminet/<feature>}
+ *   (not necessarily its own localhost — the receiving device can act as a relay to a
+ *   different target), and returns the JSON as the response body. That device-side
+ *   change is out of scope of this repository.</li>
  * </ul>
  */
 @Path("{scopeId}/devices/{deviceId}/illuminet")
@@ -102,6 +104,8 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
     private static final KapuaAppProperties MQTT_APP_VERSION = () -> "V1";
     private static final String MQTT_ILLUMINET_RESOURCE = "illuminet";
     private static final String MQTT_FEATURE_METRIC = "illuminet.feature";
+    private static final String MQTT_IP_METRIC = "illuminet.ip";
+    private static final String MQTT_PORT_METRIC = "illuminet.port";
     private static final long MQTT_DEFAULT_TIMEOUT = 5000L;
     private static final long MQTT_MAX_TIMEOUT = 10000L;
 
@@ -167,14 +171,16 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
     public Response setAnnotatorEnableMqtt(
             @PathParam("scopeId") ScopeId scopeId,
             @PathParam("deviceId") EntityId deviceId,
+            @QueryParam("ip") String ip,
+            @QueryParam("port") @DefaultValue("9090") int port,
             @QueryParam("enable") int enable,
             @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
         checkPermission(scopeId, Actions.write);
         if (enable != 0 && enable != 1) {
             return badRequest("enable must be 0 or 1");
         }
-        LOGGER.info("Illuminet (MQTT): set annotator enable={} scopeId={} deviceId={}", enable, scopeId, deviceId);
-        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?enable=" + enable);
+        LOGGER.info("Illuminet (MQTT): set annotator enable={} target={}:{} scopeId={} deviceId={}", enable, ip, port, scopeId, deviceId);
+        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?enable=" + enable, ip, port);
     }
 
     /** MQTT equivalent of {@link #setAnnotatorVisible}. */
@@ -184,14 +190,16 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
     public Response setAnnotatorVisibleMqtt(
             @PathParam("scopeId") ScopeId scopeId,
             @PathParam("deviceId") EntityId deviceId,
+            @QueryParam("ip") String ip,
+            @QueryParam("port") @DefaultValue("9090") int port,
             @QueryParam("visible") int visible,
             @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
         checkPermission(scopeId, Actions.write);
         if (visible != 0 && visible != 1) {
             return badRequest("visible must be 0 or 1");
         }
-        LOGGER.info("Illuminet (MQTT): set annotator visible={} scopeId={} deviceId={}", visible, scopeId, deviceId);
-        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?visible=" + visible);
+        LOGGER.info("Illuminet (MQTT): set annotator visible={} target={}:{} scopeId={} deviceId={}", visible, ip, port, scopeId, deviceId);
+        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?visible=" + visible, ip, port);
     }
 
     /** MQTT equivalent of {@link #setAnnotatorBrushColor}. */
@@ -201,24 +209,38 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
     public Response setAnnotatorBrushColorMqtt(
             @PathParam("scopeId") ScopeId scopeId,
             @PathParam("deviceId") EntityId deviceId,
+            @QueryParam("ip") String ip,
+            @QueryParam("port") @DefaultValue("9090") int port,
             @QueryParam("color") int color,
             @QueryParam("timeout") @DefaultValue("5000") Long timeout) throws KapuaException {
         checkPermission(scopeId, Actions.write);
         if (color < 1 || color > 5) {
             return badRequest("color must be between 1 and 5");
         }
-        LOGGER.info("Illuminet (MQTT): set annotator brush-color={} scopeId={} deviceId={}", color, scopeId, deviceId);
-        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?brush-color=" + color);
+        LOGGER.info("Illuminet (MQTT): set annotator brush-color={} target={}:{} scopeId={} deviceId={}", color, ip, port, scopeId, deviceId);
+        return forwardMqtt(scopeId, deviceId, timeout, "Annotator?brush-color=" + color, ip, port);
     }
 
     /**
      * Send the given Illuminet feature path to the device over the (already-subscribed)
-     * SIGNAGE-V1 MQTT app, resource=illuminet, and relay the device's JSON response
-     * straight through as the REST response body.
+     * SIGNAGE-V1 MQTT app, resource=illuminet, telling the device which IP:port to visit
+     * and execute the command against (instead of assuming the device should always call
+     * its own localhost) — this lets the receiving device act as a relay/gateway to a
+     * different target if needed. Relays the device's JSON response straight through as
+     * the REST response body.
      *
      * @param feature the Illuminet HTTP feature path + query, e.g. "Annotator?enable=1"
+     * @param ip target IP the device should visit, e.g. "172.16.19.37"
+     * @param port target port the device should visit, e.g. 9090
      */
-    private Response forwardMqtt(ScopeId scopeId, EntityId deviceId, Long timeout, String feature) throws KapuaException {
+    private Response forwardMqtt(ScopeId scopeId, EntityId deviceId, Long timeout, String feature, String ip, int port) throws KapuaException {
+        if (ip == null || !isValidIpv4(ip)) {
+            return badRequest("ip must be a valid IPv4 address, e.g. 172.16.19.37");
+        }
+        if (port < 1 || port > 65535) {
+            return badRequest("port must be between 1 and 65535");
+        }
+
         GenericRequestChannel channel = REQUEST_FACTORY.newRequestChannel();
         channel.setAppName(MQTT_APP_NAME);
         channel.setVersion(MQTT_APP_VERSION);
@@ -227,6 +249,8 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
 
         GenericRequestPayload payload = REQUEST_FACTORY.newRequestPayload();
         payload.getMetrics().put(MQTT_FEATURE_METRIC, feature);
+        payload.getMetrics().put(MQTT_IP_METRIC, ip);
+        payload.getMetrics().put(MQTT_PORT_METRIC, String.valueOf(port));
 
         GenericRequestMessage request = REQUEST_FACTORY.newRequestMessage();
         request.setScopeId(scopeId);
@@ -237,8 +261,9 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
 
         long requestTimeout = (timeout == null || timeout <= 0) ? MQTT_DEFAULT_TIMEOUT : Math.min(timeout, MQTT_MAX_TIMEOUT);
         LOGGER.info(
-                "Illuminet (MQTT): sending scopeId={} deviceId={} appId=SIGNAGE-V1 resource=illuminet feature={} timeout={}",
-                scopeId, deviceId, feature, requestTimeout);
+                "Illuminet (MQTT): sending scopeId={} deviceId={} appId=SIGNAGE-V1 resource=illuminet "
+                        + "target={}:{} feature={} timeout={}",
+                scopeId, deviceId, ip, port, feature, requestTimeout);
 
         GenericResponseMessage response;
         try {

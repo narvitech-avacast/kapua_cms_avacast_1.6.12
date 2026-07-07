@@ -154,13 +154,17 @@
     <div class="form-row">
       <label>傳輸方式</label>
       <div class="weekday-group">
-        <label class="weekday-option"><input type="radio" name="illuminet-transport" value="http" checked onchange="onIlluminetTransportChange()">直接 HTTP（裝置需與 CMS 同網段可直連）</label>
-        <label class="weekday-option"><input type="radio" name="illuminet-transport" value="mqtt" onchange="onIlluminetTransportChange()">MQTT（透過裝置既有 MQTT 連線，需裝置端 SIGNAGE-V1 handler 配合）</label>
+        <label class="weekday-option"><input type="radio" name="illuminet-transport" value="http" checked>直接 HTTP（CMS 直接呼叫裝置，需同網段可直連）</label>
+        <label class="weekday-option"><input type="radio" name="illuminet-transport" value="mqtt">MQTT（裝置收到後自己呼叫下方 IP:Port，需裝置端 SIGNAGE-V1 handler 配合）</label>
       </div>
     </div>
     <div class="form-row" id="illuminet-ip-row">
-      <label for="illuminet-ip">裝置 IP（直接 HTTP 模式用）</label>
+      <label for="illuminet-ip">目標 IP</label>
       <input type="text" id="illuminet-ip" value="172.16.19.37" placeholder="例：172.16.19.37">
+    </div>
+    <div class="form-row" id="illuminet-port-row">
+      <label for="illuminet-port">目標 Port</label>
+      <input type="text" id="illuminet-port" value="9090" placeholder="例：9090">
     </div>
     <div class="form-row">
       <label class="tog">
@@ -1006,18 +1010,12 @@ function illuminetTransport() {
   return checked ? checked.value : 'http';
 }
 
-function onIlluminetTransportChange() {
-  document.getElementById('illuminet-ip-row').style.display =
-    illuminetTransport() === 'http' ? '' : 'none';
-}
-
 async function illuminetPut(path, params) {
   const transport = illuminetTransport();
   const fullPath = transport === 'mqtt' ? `mqtt/${path}` : path;
-  const query = new URLSearchParams({ ...params, timeout: '5000' });
-  if (transport === 'http') {
-    query.set('ip', document.getElementById('illuminet-ip').value.trim());
-  }
+  const ip = document.getElementById('illuminet-ip').value.trim();
+  const port = document.getElementById('illuminet-port').value.trim();
+  const query = new URLSearchParams({ ip, port, ...params, timeout: '5000' });
   const response = await fetch(`${ILLUMINET_BASE}/${fullPath}?${query.toString()}`, {
     method: 'PUT',
     headers: JSON_HEADERS
@@ -1030,9 +1028,8 @@ async function illuminetPut(path, params) {
 }
 
 async function applyIlluminetAnnotator() {
-  const transport = illuminetTransport();
-  if (transport === 'http' && !document.getElementById('illuminet-ip').value.trim()) {
-    setIlluminetStatus('請輸入裝置 IP', 'error');
+  if (!document.getElementById('illuminet-ip').value.trim()) {
+    setIlluminetStatus('請輸入目標 IP', 'error');
     return;
   }
   const btn = document.getElementById('illuminet-apply-btn');
