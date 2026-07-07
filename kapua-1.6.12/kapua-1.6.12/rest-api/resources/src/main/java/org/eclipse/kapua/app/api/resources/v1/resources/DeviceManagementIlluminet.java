@@ -283,6 +283,9 @@ public class DeviceManagementIlluminet extends AbstractKapuaResource {
                 ? new String(bodyBytes, StandardCharsets.UTF_8)
                 : "{}";
 
+        LOGGER.info("Illuminet (MQTT): device replied responseCode={} body={}",
+                response.getResponseCode(), responseJson);
+
         return Response.status(mapResponseCode(response))
                 .type(MediaType.APPLICATION_JSON)
                 .entity(responseJson)
